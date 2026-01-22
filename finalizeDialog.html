@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+  </head>
+  <body>
+    <div class="block form-group">
+      <label for="batchNo">Batch Number</label>
+      <input type="text" id="batchNo" name="batchNo" placeholder="e.g., 2025-07-001">
+    </div>
+    <div class="block form-group">
+      <label for="debitMemoFile">Upload Debit Memo (PDF)</label>
+      <input type="file" id="debitMemoFile" name="debitMemoFile" accept="application/pdf">
+    </div>
+    <div class="block form-group">
+      <label for="creditMemoFile">Upload Credit Memo (XLSX or CSV)</label>
+      <input type="file" id="creditMemoFile" name="creditMemoFile">
+    </div>
+    <div class="block">
+      <button class="action" id="submit-button">Submit and Finalize</button>
+    </div>
+    <script>
+      document.getElementById('submit-button').addEventListener('click', function() {
+        const batchNo = document.getElementById('batchNo').value;
+        const debitFile = document.getElementById('debitMemoFile').files[0];
+        const creditFile = document.getElementById('creditMemoFile').files[0];
+        
+        if (!batchNo || !debitFile || !creditFile) {
+          alert('Please enter the batch number and upload both files.');
+          return;
+        }
+
+        this.innerHTML = "Processing...";
+        this.disabled = true;
+
+        // Read Debit Memo
+        const debitReader = new FileReader();
+        debitReader.onload = function(e) {
+          const debitFileData = { name: debitFile.name, mimeType: debitFile.type, bytes: e.target.result.split(',')[1] };
+
+          // Read Credit Memo
+          const creditReader = new FileReader();
+          creditReader.onload = function(e2) {
+            const creditFileData = { name: creditFile.name, mimeType: creditFile.type, bytes: e2.target.result.split(',')[1] };
+            
+            const dataObject = {
+              batchNo: batchNo,
+              debitFile: debitFileData,
+              creditFile: creditFileData
+            };
+
+            // This will call the new finalizeBatchForWebApp function
+            google.script.run
+              .withSuccessHandler(function(msg) { 
+                  alert(msg.message || msg); 
+                  google.script.host.close(); 
+              })
+              .withFailureHandler(function(err) { 
+                  alert('Error: ' + err.message); 
+                  google.script.host.close();
+              })
+              .finalizeBatchForWebApp(dataObject);
+          };
+          creditReader.readAsDataURL(creditFile);
+        };
+        debitReader.readAsDataURL(debitFile);
+      });
+    </script>
+  </body>
+</html>

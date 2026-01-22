@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background-color: #f8f9fa; }
+      .header {
+          background-color: #fff;
+          padding: 10px 30px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+          position: fixed;
+          width: 100%;
+          top: 0;
+          left: 0;
+          box-sizing: border-box;
+          z-index: 100;
+      }
+      .header-logo { height: 40px; }
+      .logout-btn {
+          background-color: #CDAE2C;
+          color: #1C2790;
+          padding: 8px 16px;
+          font-weight: bold;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: background-color 0.3s;
+      }
+      .logout-btn:hover { background-color: #b39520; }
+      
+      .main-content {
+          padding-top: 80px;
+          padding-bottom: 40px;
+          display: flex;
+          justify-content: center;
+          min-height: 100vh;
+          box-sizing: border-box;
+      }
+      .container { max-width: 1000px; width: 95%; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+      h1, h2 { color: #1C2790; margin-top: 0; }
+      
+      /* Upload Styles */
+      .upload-box { border: 2px dashed #ccc; padding: 20px; margin-bottom: 20px; text-align: center; }
+      button#upload-button { background-color: #1C2790; color: white; padding: 12px 18px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+      button#upload-button:disabled { background-color: #ccc; }
+      #status { margin-top: 20px; font-weight: bold; text-align: center; }
+      
+      /* Tabs */
+      .tabs { display: flex; border-bottom: 2px solid #dee2e6; margin-bottom: 20px; }
+      .tab-button { padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 16px; font-weight: bold; color: #495057; }
+      .tab-button.active, .tab-button:hover { color: #1C2790; border-bottom: 2px solid #1C2790; }
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+
+      /* Tables */
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+      th, td { border: 1px solid #dee2e6; padding: 10px; text-align: left; }
+      th { background-color: #f8f9fa; color: #495057; }
+      
+      /* Action Buttons */
+      .btn-sm { padding: 5px 10px; font-size: 12px; border-radius: 3px; border: none; cursor: pointer; margin-right: 5px; color: white; }
+      .btn-draft { background-color: #17a2b8; } /* Teal */
+      .btn-approve { background-color: #28a745; } /* Green */
+      .btn-view { background-color: #6c757d; text-decoration: none; display: inline-block; } /* Gray */
+      .btn-disabled { background-color: #ccc; cursor: not-allowed; }
+
+      /* Status Badges */
+      .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; }
+      .status-draft { background-color: #ffc107; color: #333; }
+      .status-approved { background-color: #28a745; }
+      
+      #loader { text-align: center; display: none; padding: 20px; }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+        <img src="https://coe-psp.dap.edu.ph/wp-content/uploads/2022/06/dap-logo.png" alt="DAP Logo" class="header-logo">
+        <button class="logout-btn" onclick="handleLogout()">Logout</button>
+    </div>
+    
+    <div class="main-content">
+        <div class="container">
+          
+          <div class="tabs">
+            <button class="tab-button active" onclick="openTab(event, 'UploadTab')">Upload DV</button>
+            <button class="tab-button" onclick="openTab(event, 'TaxCertTab')">Tax Certificates</button>
+          </div>
+
+          <div id="UploadTab" class="tab-content active">
+              <h1>Disbursement Voucher Upload</h1>
+              <p>This page is for use by the Accounting Division only.</p>
+              <div class="upload-box">
+                <label for="file">Select DV PDF to Upload</label><br><br>
+                <input type="file" id="file" name="file" accept="application/pdf">
+              </div>
+              <div style="text-align:center">
+                  <button id="upload-button">Upload and Process</button>
+              </div>
+              <div id="status"></div>
+              
+              <h2>Recently Uploaded</h2>
+              <table id="recent-uploads">
+                <thead>
+                  <tr>
+                    <th>Payee Name</th>
+                    <th>DV Number</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+          </div>
+
+          <div id="TaxCertTab" class="tab-content">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <h2>Tax Certificate Management</h2>
+                  <button class="btn-sm btn-view" onclick="loadTaxCerts()">Refresh List</button>
+              </div>
+              
+              <div id="loader">Loading tax data...</div>
+              
+              <table id="tax-table">
+                <thead>
+                  <tr>
+                    <th>DV No</th>
+                    <th>Payee</th>
+                    <th>Tax Base</th>
+                    <th>Tax Withheld</th>
+                    <th>Status</th>
+                    <th style="width: 200px;">Actions</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+          </div>
+
+        </div>
+    </div>
+
+    <script>
+      function handleLogout() {
+        const token = new URLSearchParams(window.location.search).get('token');
+        google.script.run.withSuccessHandler(() => {
+            window.top.location.replace("<?= ScriptApp.getService().getUrl() ?>");
+        }).logoutUser(token);
+      }
+      
+      // --- TAB LOGIC ---
+      function openTab(evt, tabName) {
+        const tabContent = document.getElementsByClassName("tab-content");
+        for (let i = 0; i < tabContent.length; i++) {
+          tabContent[i].classList.remove("active");
+        }
+        const tabLinks = document.getElementsByClassName("tab-button");
+        for (let i = 0; i < tabLinks.length; i++) {
+          tabLinks[i].classList.remove("active");
+        }
+        document.getElementById(tabName).classList.add("active");
+        evt.currentTarget.classList.add("active");
+
+        // Load data if switching to Tax Cert tab
+        if(tabName === 'TaxCertTab') {
+            loadTaxCerts();
+        }
+      }
+
+      // --- TAX CERTIFICATE LOGIC ---
+      function loadTaxCerts() {
+        document.getElementById('loader').style.display = 'block';
+        document.querySelector('#tax-table tbody').innerHTML = '';
+        
+        google.script.run.withSuccessHandler(renderTaxTable).getTaxCertList();
+      }
+
+// --- CLIENT SIDE: THE RELAY RACE ---
+
+function renderTaxTable(data) {
+        document.getElementById('loader').style.display = 'none';
+        const tbody = document.querySelector('#tax-table tbody');
+        
+        // Debugging: Check the browser console (F12) to see exactly what data arrived
+        console.log("Tax Data Received:", data);
+
+        if (!data || data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center">No tax records found.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = ''; // Clear existing rows
+
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            
+            // Safer Number Parsing (Handle strings, numbers, or nulls)
+            const parseAmt = (val) => {
+                if (val === '' || val === null || val === undefined) return '0.00';
+                // If it's a string with commas, strip them. If it's a number, use it.
+                const num = typeof val === 'string' ? parseFloat(val.replace(/,/g, '')) : parseFloat(val);
+                return isNaN(num) ? '0.00' : num.toLocaleString('en-US', {minimumFractionDigits:2});
+            };
+
+            const base = parseAmt(row['Tax Base']);
+            const withheld = parseAmt(row['EWT Amount']);
+            
+            // Status Badge Logic
+            let statusHtml = `<span class="badge status-draft">${row['Status'] || 'Draft'}</span>`;
+            if (row['Status'] === 'Approved') statusHtml = `<span class="badge status-approved">Approved</span>`;
+            if (row['Status'] === 'Rejected') statusHtml = `<span class="badge" style="background:red">Rejected</span>`;
+
+            // Actions Logic
+            let actions = '';
+            const link = row['Tax Cert Link'];
+            const dvNo = row['DV No'];
+
+            if (!link || link === '' || row['Status'] === 'Rejected') {
+                actions = `<button class="btn-sm btn-draft" onclick="startApprovalProcess('${dvNo}', this)">Process & Request Approval</button>`;
+            } else {
+                actions = `<a href="${link}" target="_blank" class="btn-sm btn-view">View Draft/Cert</a>`;
+                if (row['Status'] !== 'Approved') {
+                     actions += ` <span style="font-size:11px; color:#777; margin-left:5px;">(Pending)</span>`;
+                     // Optional resend button
+                     actions += ` <button class="btn-sm btn-view" onclick="sendEmailOnly('${dvNo}', this)" style="background:#17a2b8; margin-left:5px;" title="Resend Email"><i class="fas fa-envelope"></i></button>`;
+                }
+            }
+
+            tr.innerHTML = `
+                <td>${dvNo}</td>
+                <td>${row['Payee Name']}</td>
+                <td>${base}</td>
+                <td>${withheld}</td>
+                <td>${statusHtml}</td>
+                <td>${actions}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+      }
+
+      // Main Trigger Function
+      function startApprovalProcess(dvNo, btn) {
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        
+        // Step 1: Generate Draft
+        btn.innerText = "Generating Draft...";
+        google.script.run
+            .withSuccessHandler((res) => {
+                if (res.success) {
+                    // Step 2: Send Email
+                    btn.innerText = "Sending Email...";
+                    requestApprovalEmail(dvNo, btn, originalText);
+                } else {
+                    alert("Error generating draft: " + res.message);
+                    btn.innerText = originalText;
+                    btn.disabled = false;
+                }
+            })
+            .withFailureHandler((err) => { alert(err); btn.disabled = false; })
+            .generateTaxCert(dvNo, false); // false = Draft
+      }
+
+      function requestApprovalEmail(dvNo, btn, originalText) {
+        google.script.run
+            .withSuccessHandler((res) => {
+                if (res.success) {
+                    alert("Success! Draft generated and Approval Request sent to Accountant.");
+                    loadTaxCerts(); // Refresh UI
+                } else {
+                    alert("Draft generated, but Email Failed: " + res.message);
+                    loadTaxCerts();
+                }
+            })
+            .withFailureHandler((err) => { alert("Email Error: " + err); loadTaxCerts(); })
+            .sendAccountantEmail(dvNo);
+      }
+
+      function sendEmailOnly(dvNo, btn) {
+          if(!confirm("Resend approval email to accountant?")) return;
+          btn.innerText = "...";
+          requestApprovalEmail(dvNo, btn, "Resend Email");
+      }
+
+
+
+      // --- UPLOAD LOGIC (Existing) ---
+      const uploadButton = document.getElementById('upload-button');
+      const fileInput = document.getElementById('file');
+      const statusDiv = document.getElementById('status');
+      const uploadsTableBody = document.querySelector("#recent-uploads tbody");
+
+      uploadButton.addEventListener('click', function() {
+        if (!fileInput.files[0]) {
+          statusDiv.textContent = "Please select a file first.";
+          statusDiv.style.color = 'red';
+          return;
+        }
+        
+        statusDiv.textContent = "Processing... please wait.";
+        statusDiv.style.color = 'blue';
+        uploadButton.disabled = true;
+
+        const file = fileInput.files[0];
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const dataObject = {
+            name: file.name,
+            mimeType: file.type,
+            file: e.target.result.split(',')[1]
+          };
+          google.script.run
+            .withSuccessHandler(updateStatus)
+            .withFailureHandler(updateStatus)
+            .processUploadedPdfForWebApp(dataObject);
+        };
+        reader.readAsDataURL(file);
+      });
+
+      function updateStatus(result) {
+        // Handle string errors (from failure handler)
+        if (typeof result === 'string') {
+             statusDiv.textContent = "Error: " + result;
+             statusDiv.style.color = 'red';
+             uploadButton.disabled = false;
+             return;
+        }
+
+        statusDiv.textContent = result.message;
+        statusDiv.style.color = result.isError ? 'red' : 'green';
+        
+        if(result.data){
+          const newRow = uploadsTableBody.insertRow(0);
+          const formattedAmount = result.data.amount ? parseFloat(result.data.amount.replace(/,/g, '')).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+          newRow.innerHTML = `<td>${result.data.payee}</td><td>${result.data.dv}</td><td>${formattedAmount}</td><td>Logged</td>`;
+        }
+        
+        uploadButton.disabled = false;
+        fileInput.value = '';
+      }
+    </script>
+  </body>
+</html>

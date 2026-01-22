@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; }
+        .header { background-color: #1C2790; color: white; padding: 20px; text-align: center; position: relative; }
+        .header img { max-width: 400px; margin-bottom: 10px; }
+        .header h1 { margin: 0; font-size: 22px; font-weight: normal; }
+        .container { padding: 20px; max-width: 1200px; margin: auto; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 20px; padding: 20px; }
+        .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .form-group { display: flex; flex-direction: column; }
+        label { margin-bottom: 5px; color: #495057; font-weight: bold; }
+        input[type="text"], textarea, select { padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; width: 100%; box-sizing: border-box; }
+        .button-group { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+        .action-button { background-color: #1C2790; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; transition: background-color 0.3s; }
+        .action-button:hover { background-color: #131a63; }
+        .action-button.accent { background-color: #CDAE2C; }
+        .action-button.accent:hover { background-color: #b39520; }
+        .action-button.success { background-color: #28a745; }
+        .action-button.success:hover { background-color: #218838; }
+        .tabs { display: flex; border-bottom: 2px solid #dee2e6; margin-bottom: 20px; }
+        .tab-button { padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 16px; font-weight: bold; color: #495057; }
+        .tab-button.active, .tab-button:hover { color: #1C2790; border-bottom: 2px solid #1C2790; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dee2e6; font-size: 14px; word-break: break-word; }
+        th { background-color: #f8f9fa; color: #495057; }
+        #loader { text-align: center; padding: 50px; font-size: 20px; color: #6c757d; display: none; }
+        
+        /* Modal Styles */
+        .modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 200; }
+        .modal-content { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 90%; max-width: 800px; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid #ccc;}
+        .modal-close { font-size: 24px; cursor: pointer; border: none; background: none; font-weight: bold; }
+
+        /* Reconciliation Specific Styles */
+        .recon-dropzone { border: 2px dashed #1C2790; border-radius: 5px; padding: 40px; text-align: center; color: #1C2790; cursor: pointer; background-color: #f8f9fa; transition: background 0.3s; }
+        .recon-dropzone:hover { background-color: #e2e6ea; }
+        .progress-container { margin-top: 20px; display: none; }
+        .progress-bar-bg { width: 100%; background-color: #e9ecef; border-radius: 5px; height: 20px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; background-color: #28a745; width: 0%; transition: width 0.3s; }
+        .status-text { margin-top: 5px; font-size: 14px; color: #555; font-style: italic; }
+        .recon-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; color: white; }
+        .badge-new { background-color: #28a745; }
+        .badge-update { background-color: #ffc107; color: #333; }
+        .recon-input { padding: 5px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 3px; }
+        
+        /* Recon Tabs */
+        .recon-tabs { display: flex; margin-bottom: 15px; border-bottom: 1px solid #ddd; }
+        .recon-tab-btn { padding: 8px 16px; background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; font-weight: bold; color: #555; }
+        .recon-tab-btn.active { color: #1C2790; border-bottom-color: #1C2790; }
+        .recon-view { display: none; }
+        .recon-view.active { display: block; }
+
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <img src="https://i.imgur.com/jaEbfAR.png" alt="DAP Logo" />
+    <h1>E-Payment System - Admin Dashboard</h1>
+</div>
+
+<div class="container">
+    <div class="tabs">
+        <button class="tab-button active" onclick="openTab(event, 'InternalPayees')">Internal Payee Management</button>
+        <button class="tab-button" onclick="openTab(event, 'ExternalEnrollment')">External Enrollment</button>
+        <button class="tab-button" onclick="openTab(event, 'SdoManagement')">SDO Management</button>
+        <button class="tab-button" onclick="openTab(event, 'HrisReconciliation')">HRIS Reconciliation</button>
+    </div>
+
+    <div id="loader"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+
+    <div id="InternalPayees" class="tab-content active">
+        <div class="card">
+            <h2>Internal Payee Management</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="payeeName">Payee Name (SURNAME, FIRST M.)</label>
+                    <input type="text" id="payeeName">
+                </div>
+                <div class="form-group">
+                    <label for="lbpAccount">Landbank Account Number</label>
+                    <input type="text" id="lbpAccount">
+                </div>
+                <div class="form-group">
+                    <label for="emailAddress">Email Address</label>
+                    <input type="text" id="emailAddress">
+                </div>
+                <div class="form-group">
+                    <label for="hrisNumber">HRIS Number</label>
+                    <input type="text" id="hrisNumber">
+                </div>
+            </div>
+            <div class="button-group">
+                <button class="action-button" onclick="addPayee()">Add New Payee</button>
+                <button class="action-button accent" onclick="updatePayee()">Update Selected Payee</button>
+                <button onclick="clearForm()">Clear Form</button>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Payee Database</h2>
+            <input type="text" id="searchInput" onkeyup="searchTable()" placeholder="Search for names..." style="width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 20px;">
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table id="payeeTable">
+                    <thead>
+                        <tr>
+                            <th>Select</th>
+                            <th>Payee Name</th>
+                            <th>Landbank Account</th>
+                            <th>Email Address</th>
+                            <th>HRIS Number</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="ExternalEnrollment" class="tab-content">
+        <div class="card">
+            <h2>Pending HR Validation</h2>
+            <div id="pendingHrContainer" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+        <div class="card">
+            <h2>Pending Final Approval</h2>
+            <div id="pendingAdminContainer" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+    </div>
+    
+    <div id="SdoManagement" class="tab-content">
+        <div class="card">
+            <h2>Enroll SDO PCF Account</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="sdoPayeeName">Select Payee</label>
+                    <select id="sdoPayeeName"></select>
+                </div>
+                <div class="form-group">
+                    <label for="pcfAccountNumber">PCF Account Number</label>
+                    <input type="text" id="pcfAccountNumber">
+                </div>
+            </div>
+            <div class="button-group">
+                <button class="action-button" onclick="enrollSdo()">Enroll SDO Account</button>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Enrolled SDO PCF Accounts</h2>
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table id="sdoTable">
+                    <thead>
+                        <tr>
+                            <th>Payee Name</th>
+                            <th>PCF Account Number</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="HrisReconciliation" class="tab-content">
+        <div class="card">
+            <h2><i class="fas fa-sync"></i> HRIS Reconciliation</h2>
+            <p>Upload the HRIS CSV file to check for discrepancies against the E-Payment Database.</p>
+            
+            <div id="reconUploadArea">
+                <div class="recon-dropzone" onclick="document.getElementById('hrisFileInput').click()">
+                    <i class="fas fa-cloud-upload-alt fa-3x"></i><br><br>
+                    <strong>Click here to upload CSV file</strong>
+                    <input type="file" id="hrisFileInput" accept=".csv" style="display: none;" onchange="startReconciliation(event)">
+                </div>
+            </div>
+
+            <div id="reconProgress" class="progress-container">
+                <div class="progress-bar-bg">
+                    <div id="progressBarFill" class="progress-bar-fill"></div>
+                </div>
+                <div id="progressStatus" class="status-text">Initializing...</div>
+            </div>
+        </div>
+
+        <div id="reconResults" style="display: none;">
+            <div class="card">
+                <div class="recon-tabs">
+                    <button class="recon-tab-btn active" onclick="openReconView(event, 'resNew')">New Payees Found (<span id="countNew">0</span>)</button>
+                    <button class="recon-tab-btn" onclick="openReconView(event, 'resUpdates')">Account Updates (<span id="countUpdate">0</span>)</button>
+                </div>
+
+                <div id="resNew" class="recon-view active">
+                    <p style="background: #e9ecef; padding: 10px; border-radius: 4px;">
+                        <i class="fas fa-info-circle"></i> <b>Action Required:</b> Fill in missing Email Addresses and HRIS IDs.
+                    </p>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <table id="tblNewPayees">
+                            <thead>
+                                <tr>
+                                    <th>Payee Name</th>
+                                    <th>HRIS ID</th>
+                                    <th>LBP Account</th>
+                                    <th>Email Address (Required)</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="resUpdates" class="recon-view">
+                    <p style="background: #fff3cd; padding: 10px; border-radius: 4px;">
+                        <i class="fas fa-exclamation-triangle"></i> <b>Review Updates:</b> Uncheck to reject. Checked items will save.
+                    </p>
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        <table id="tblUpdates">
+                            <thead>
+                                <tr>
+                                    <th>Apply?</th>
+                                    <th>Payee Name</th>
+                                    <th>Old Account</th>
+                                    <th>New Account (HRIS)</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="button-group" style="justify-content: flex-end; margin-top: 20px;">
+                     <button class="action-button" style="background-color: #6c757d;" onclick="resetRecon()">Cancel</button>
+                    <button class="action-button success" onclick="finalizeSync()">Confirm & Sync Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="request-modal" class="modal-backdrop">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modal-title">Enrollment Details</h2>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div id="modal-body" style="padding-top: 20px;"></div>
+    </div>
+</div>
+
+<script>
+    // GLOBAL STATE
+    let currentPayees = [];
+    let selectedPayeeName = null;
+    let allRequests = {};
+    
+    // RECONCILIATION STATE
+    let dbMap = {}; // Will hold { "NAME": "ACCOUNT" } from server
+    let finalNewList = [];
+    let finalUpdateList = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadPayees(); // Also loads data needed for SDO dropdowns
+        loadEnrollmentRequests();
+        loadSdoAccounts();
+    });
+
+    // --- UI HELPERS ---
+    function showLoader() { document.getElementById('loader').style.display = 'block'; }
+    function hideLoader() { document.getElementById('loader').style.display = 'none'; }
+    
+    function openTab(evt, tabName) {
+        document.querySelectorAll('.container > .tab-content').forEach(tab => tab.classList.remove('active'));
+        document.querySelectorAll('.container > .tabs > .tab-button').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(tabName).classList.add('active');
+        if (evt) evt.currentTarget.classList.add('active');
+    }
+
+    function handleSuccess(message) {
+        alert(message);
+        closeModal();
+        resetRecon(); // Reset the reconciliation screen
+        loadPayees();
+        loadEnrollmentRequests();
+        loadSdoAccounts();
+        hideLoader();
+    }
+
+    function handleError(error) {
+        alert('Error: ' + error.message);
+        hideLoader();
+    }
+    
+    // --- INTERNAL PAYEE & COMMON ---
+    function loadPayees() {
+        showLoader();
+        google.script.run.withSuccessHandler(payees => {
+            currentPayees = payees;
+            renderPayeeTable(payees);
+            populateSdoPayeeDropdown(payees);
+            hideLoader();
+        }).getPayees();
+    }
+    
+    function renderPayeeTable(payees) {
+        const tbody = document.querySelector('#payeeTable tbody');
+        tbody.innerHTML = '';
+        if (!payees || payees.length === 0) return;
+        payees.forEach(payee => {
+            const tr = tbody.insertRow();
+            tr.innerHTML = `
+                <td><input type="radio" name="payeeSelect" value="${payee.name}" onclick="selectPayee(this)"></td>
+                <td>${payee.name}</td>
+                <td>${payee.account}</td>
+                <td>${payee.email}</td>
+                <td>${payee.hris}</td>
+            `;
+        });
+    }
+
+    function selectPayee(radio) {
+        selectedPayeeName = radio.value;
+        const payee = currentPayees.find(p => p.name === selectedPayeeName);
+        if (payee) {
+            document.getElementById('payeeName').value = payee.name;
+            document.getElementById('lbpAccount').value = payee.account;
+            document.getElementById('emailAddress').value = payee.email;
+            document.getElementById('hrisNumber').value = payee.hris;
+        }
+    }
+
+    function clearForm() {
+        selectedPayeeName = null;
+        document.getElementById('payeeName').value = '';
+        document.getElementById('lbpAccount').value = '';
+        document.getElementById('emailAddress').value = '';
+        document.getElementById('hrisNumber').value = '';
+        document.getElementsByName('payeeSelect').forEach(r => r.checked = false);
+    }
+
+    function addPayee() {
+        const d = getFormData();
+        if(!d.name || !d.account) return alert('Name and Account required');
+        showLoader();
+        google.script.run.withSuccessHandler(handleSuccess).addPayee(d);
+    }
+    
+    function updatePayee() {
+        if (!selectedPayeeName) return alert('Select a payee first');
+        showLoader();
+        google.script.run.withSuccessHandler(handleSuccess).updatePayee(selectedPayeeName, getFormData());
+    }
+
+    function getFormData() {
+        return {
+            name: document.getElementById('payeeName').value.trim(),
+            account: document.getElementById('lbpAccount').value.trim(),
+            email: document.getElementById('emailAddress').value.trim(),
+            hris: document.getElementById('hrisNumber').value.trim()
+        };
+    }
+    
+    function searchTable() {
+        const filter = document.getElementById('searchInput').value.toUpperCase();
+        renderPayeeTable(currentPayees.filter(p => p.name.toUpperCase().includes(filter)));
+    }
+
+    // --- RECONCILIATION LOGIC (CLIENT SIDE) ---
+    function startReconciliation(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // UI Setup
+        document.getElementById('reconResults').style.display = 'none';
+        document.getElementById('reconUploadArea').style.display = 'none';
+        document.getElementById('reconProgress').style.display = 'block';
+        updateProgress(5, "Fetching Database Map...");
+
+        // 1. Fetch DB Map from Server
+        google.script.run.withSuccessHandler(serverDbMap => {
+            dbMap = serverDbMap;
+            updateProgress(15, "Reading CSV File...");
+            
+            // 2. Read File using FileReader (Client Side)
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                processCsvData(e.target.result);
+            };
+            reader.readAsText(file);
+        }).getCurrentPayeeMap();
+    }
+
+    function processCsvData(csvText) {
+        const lines = csvText.split(/\r\n|\n/);
+        const totalLines = lines.length;
+        
+        // Find Header Row dynamically
+        let headerIndex = -1;
+        let colMap = { id: -1, name: -1, acct: -1 };
+        
+        // Scan first 20 lines for headers
+        for (let i = 0; i < Math.min(20, totalLines); i++) {
+            const row = lines[i].toLowerCase();
+            if (row.includes('id#') && row.includes('savings acct')) {
+                headerIndex = i;
+                // Simple CSV split (assuming standard format)
+                const cols = lines[i].split(','); 
+                cols.forEach((c, idx) => {
+                    const txt = c.toLowerCase().trim();
+                    if(txt.includes('id#')) colMap.id = idx;
+                    if(txt === 'name') colMap.name = idx;
+                    if(txt.includes('savings acct')) colMap.acct = idx;
+                });
+                break;
+            }
+        }
+
+        if (headerIndex === -1) {
+            alert("Could not find headers (ID#, Name, Savings Acct No).");
+            resetRecon();
+            return;
+        }
+
+        updateProgress(25, "Comparing Data...");
+
+        finalNewList = [];
+        finalUpdateList = [];
+
+        // Simple CSV parser for lines (handles basic quotes if needed)
+        const parseLine = (text) => {
+            // Regex to split by comma ONLY if not inside quotes
+            const re = /,(?=(?:(?:[^"]*"){2})*[^"]*$)/; 
+            return text.split(re).map(v => v.replace(/^"|"$/g, '').trim());
+        };
+
+        // LOOP through rows
+        for (let i = headerIndex + 1; i < totalLines; i++) {
+            if (!lines[i].trim()) continue;
+            
+            const cols = parseLine(lines[i]);
+            // Skip if Name column is missing or empty
+            if (!cols[colMap.name]) continue;
+
+            // CLEAN DATA
+            const rawName = cols[colMap.name];
+            const cleanName = rawName.toUpperCase().replace(/\s+/g, ' ').trim();
+            
+            const rawId = cols[colMap.id] || "";
+            const cleanId = rawId.replace(/DAP~/i, '').trim(); // Strip DAP~
+            
+            const rawAcct = cols[colMap.acct] || "";
+            // Keep only digits, then pad to 10 chars with leading zeros
+            const cleanAcct = rawAcct.replace(/\D/g, '').padStart(10, '0');
+
+            if (cleanAcct === "0000000000" || cleanAcct.length === 0) continue; // Skip invalid
+
+            // COMPARE LOGIC
+            if (dbMap.hasOwnProperty(cleanName)) {
+                // Payee exists in DB. Check Account.
+                const existingAcct = dbMap[cleanName].replace(/\D/g, '').padStart(10, '0');
+                
+                if (existingAcct !== cleanAcct) {
+                    finalUpdateList.push({
+                        name: cleanName,
+                        oldAccount: existingAcct,
+                        newAccount: cleanAcct
+                    });
+                }
+            } else {
+                // New Payee
+                finalNewList.push({
+                    name: cleanName,
+                    account: cleanAcct,
+                    hrisId: cleanId,
+                    email: guessEmail(cleanName)
+                });
+            }
+        }
+
+        updateProgress(100, "Processing Complete!");
+        
+        // Short delay to show 100%
+        setTimeout(() => {
+            displayReconResults();
+        }, 500);
+    }
+
+    function guessEmail(fullName) {
+        try {
+            // "ABALOS, MICHAEL P." -> split by comma
+            const parts = fullName.split(',');
+            if (parts.length < 2) return '';
+            
+            const surname = parts[0].trim().toLowerCase().replace(/\s/g, '');
+            const firstNamePart = parts[1].trim();
+            const firstInitial = firstNamePart.charAt(0).toLowerCase();
+            
+            return `${surname}${firstInitial}@dap.edu.ph`;
+        } catch(e) { return ''; }
+    }
+
+    function updateProgress(percent, text) {
+        document.getElementById('progressBarFill').style.width = percent + '%';
+        document.getElementById('progressStatus').innerText = text;
+    }
+
+    function displayReconResults() {
+        document.getElementById('reconProgress').style.display = 'none';
+        
+        document.getElementById('countNew').innerText = finalNewList.length;
+        document.getElementById('countUpdate').innerText = finalUpdateList.length;
+
+        // Render New Table
+        const tblNew = document.querySelector('#tblNewPayees tbody');
+        tblNew.innerHTML = '';
+        if (finalNewList.length === 0) {
+            tblNew.innerHTML = '<tr><td colspan="4">No new payees found.</td></tr>';
+        } else {
+            finalNewList.forEach((item, idx) => {
+                const row = tblNew.insertRow();
+                row.innerHTML = `
+                    <td>${item.name}</td>
+                    <td><input type="text" class="recon-input hris-input" value="${item.hrisId}"></td>
+                    <td>${item.account}</td>
+                    <td><input type="text" class="recon-input email-input" value="${item.email}"></td>
+                `;
+            });
+        }
+
+        // Render Update Table
+        const tblUp = document.querySelector('#tblUpdates tbody');
+        tblUp.innerHTML = '';
+        if (finalUpdateList.length === 0) {
+            tblUp.innerHTML = '<tr><td colspan="4">No updates found.</td></tr>';
+        } else {
+            finalUpdateList.forEach((item, idx) => {
+                const row = tblUp.insertRow();
+                row.innerHTML = `
+                    <td style="text-align:center;"><input type="checkbox" class="update-check" checked data-idx="${idx}"></td>
+                    <td>${item.name}</td>
+                    <td style="color:#dc3545;text-decoration:line-through;">${item.oldAccount}</td>
+                    <td style="color:#28a745;">${item.newAccount}</td>
+                `;
+            });
+        }
+
+        document.getElementById('reconResults').style.display = 'block';
+    }
+
+    function openReconView(evt, viewId) {
+        document.querySelectorAll('.recon-view').forEach(v => v.classList.remove('active'));
+        document.querySelectorAll('.recon-tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(viewId).classList.add('active');
+        evt.currentTarget.classList.add('active');
+    }
+
+    function resetRecon() {
+        document.getElementById('reconResults').style.display = 'none';
+        document.getElementById('reconProgress').style.display = 'none';
+        document.getElementById('reconUploadArea').style.display = 'block';
+        document.getElementById('hrisFileInput').value = '';
+        document.getElementById('progressBarFill').style.width = '0%';
+    }
+
+    function finalizeSync() {
+        const payloadNew = [];
+        const payloadUpdate = [];
+
+        // 1. Gather New Payees
+        const newRows = document.querySelectorAll('#tblNewPayees tbody tr');
+        let error = false;
+        
+        if (finalNewList.length > 0) {
+            newRows.forEach((row, idx) => {
+                const emailInput = row.querySelector('.email-input');
+                const hrisInput = row.querySelector('.hris-input');
+                
+                if (!emailInput) return; // Skip if table empty rows
+
+                const email = emailInput.value.trim();
+                const hris = hrisInput.value.trim();
+                const orig = finalNewList[idx];
+
+                if (!email) {
+                    emailInput.style.border = '2px solid red';
+                    error = true;
+                } else {
+                    emailInput.style.border = '1px solid #ccc';
+                    payloadNew.push({
+                        name: orig.name,
+                        account: orig.account,
+                        hrisId: hris,
+                        email: email
+                    });
+                }
+            });
+        }
+
+        if (error) return alert("Please fill in all missing emails.");
+
+        // 2. Gather Updates
+        document.querySelectorAll('.update-check:checked').forEach(chk => {
+            const idx = chk.getAttribute('data-idx');
+            payloadUpdate.push(finalUpdateList[idx]);
+        });
+
+        if (payloadNew.length === 0 && payloadUpdate.length === 0) return alert("Nothing to sync.");
+
+        if (!confirm(`Are you sure you want to add ${payloadNew.length} new payees and update ${payloadUpdate.length} accounts?`)) return;
+
+        showLoader();
+        google.script.run.withSuccessHandler(handleSuccess).commitReconciliationBatch(payloadNew, payloadUpdate);
+    }
+    
+    // --- EXTERNAL & SDO (Unchanged) ---
+    function loadEnrollmentRequests() {
+        google.script.run.withSuccessHandler(data => {
+            allRequests = {};
+            data.pendingHr.forEach(req => allRequests[req.rowIndex] = req);
+            data.pendingAdmin.forEach(req => allRequests[req.rowIndex] = req);
+            renderEnrollmentTable('pendingHrContainer', data.pendingHr, true);
+            renderEnrollmentTable('pendingAdminContainer', data.pendingAdmin, false);
+        }).getEnrollmentRequests();
+    }
+    
+    function renderEnrollmentTable(id, list, isHr) {
+        const c = document.getElementById(id);
+        if(!list.length) { c.innerHTML = '<p>No requests.</p>'; return; }
+        let h = '<table><thead><tr><th>Date</th><th>Name</th><th>Account</th><th>Action</th></tr></thead><tbody>';
+        list.forEach(r => {
+            h += `<tr><td>${r.Timestamp}</td><td>${r.Surname}, ${r.First_Name}</td><td>${r.LBP_Account_Number}</td>
+            <td><button class="action-button" onclick='viewRequest(${r.rowIndex},${isHr})'>View</button></td></tr>`;
+        });
+        c.innerHTML = h + '</tbody></table>';
+    }
+
+    function viewRequest(idx, isHr) {
+        const r = allRequests[idx];
+        if(!r) return;
+        let html = `<div class="form-grid">`;
+        ['Surname','First_Name','LBP_Account_Number','Email_Address'].forEach(k => {
+             html += `<div class="form-group"><label>${k.replace(/_/g,' ')}</label><input type="text" value="${r[k]}" readonly></div>`;
+        });
+        html += `</div>`;
+        
+        // HRIS INPUTS
+        html += `<hr><div class="form-grid"><div class="form-group"><label>HRIS Name</label><input type="text" id="m-hrisName" value="${r.HRIS_Formatted_Name||''}" ${!isHr?'readonly':''}></div>
+        <div class="form-group"><label>HRIS No.</label><input type="text" id="m-hrisNo" value="${r.HRIS_Number||''}" ${!isHr?'readonly':''}></div></div>`;
+        
+        html += `<div class="button-group">`;
+        if(isHr) html += `<button class="action-button" onclick="subAdmin(${r.rowIndex})">Submit to Admin</button>`;
+        else html += `<button class="action-button accent" onclick='apprEnroll(${JSON.stringify(r)})'>Approve</button>`;
+        html += `<button onclick="closeModal()">Close</button></div>`;
+        
+        document.getElementById('modal-body').innerHTML = html;
+        document.getElementById('request-modal').style.display = 'block';
+    }
+
+    function closeModal() { document.getElementById('request-modal').style.display = 'none'; }
+    
+    function subAdmin(idx) {
+        const n = document.getElementById('m-hrisName').value;
+        const no = document.getElementById('m-hrisNo').value;
+        if(!n || !no) return alert('HRIS details required');
+        showLoader();
+        google.script.run.withSuccessHandler(h => handleSuccess(h.message)).submitRequestToAdmin(idx, n, no);
+    }
+    
+    function apprEnroll(req) {
+        showLoader();
+        google.script.run.withSuccessHandler(h => handleSuccess(h.message)).approveAndEnrollPayee(req);
+    }
+
+    function loadSdoAccounts() {
+        google.script.run.withSuccessHandler(list => {
+            const t = document.querySelector('#sdoTable tbody');
+            t.innerHTML = '';
+            list.forEach(s => t.insertRow().innerHTML = `<td>${s.name}</td><td>${s.account}</td>`);
+        }).getSdoAccounts();
+    }
+
+    function populateSdoPayeeDropdown(payees) {
+        const s = document.getElementById('sdoPayeeName');
+        s.innerHTML = '<option value="">-- Select --</option>';
+        payees.forEach(p => {
+            const o = document.createElement('option');
+            o.value = p.name; o.innerText = p.name;
+            s.appendChild(o);
+        });
+    }
+
+    function enrollSdo() {
+        const n = document.getElementById('sdoPayeeName').value;
+        const a = document.getElementById('pcfAccountNumber').value;
+        if(!n || !a) return alert('Data missing');
+        showLoader();
+        google.script.run.withSuccessHandler(handleSuccess).addSdoAccount(n,a);
+    }
+</script>
+</body>
+</html>

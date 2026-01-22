@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+  </head>
+  <body>
+    <div class="block form-group">
+      <label for="batchNo">Batch Number</label>
+      <input type="text" id="batchNo" name="batchNo" placeholder="e.g., 2025-07-001">
+    </div>
+    <div class="block form-group">
+      <label for="weaccessRef">WeAccess Transaction Reference No.</label>
+      <input type="text" id="weaccessRef" name="weaccessRef">
+    </div>
+    <div class="block form-group">
+      <label for="payrollFile">Upload WeAccess Payroll Register (PDF)</label>
+      <input type="file" id="payrollFile" name="payrollFile" accept="application/pdf">
+    </div>
+    <div class="block">
+      <button class="action" id="submit-button">Send Request</button>
+    </div>
+    <script>
+      document.getElementById('submit-button').addEventListener('click', function() {
+        const batchNo = document.getElementById('batchNo').value;
+        const weaccessRef = document.getElementById('weaccessRef').value;
+        const file = document.getElementById('payrollFile').files[0];
+        
+        if (!batchNo || !weaccessRef) {
+          alert('Please fill in all text fields.');
+          return;
+        }
+
+        if (!file) {
+          alert('Please select the Payroll Register file to upload.');
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const dataObject = {
+            batchNo: batchNo,
+            weaccessRef: weaccessRef,
+            payrollFile: {
+              name: file.name,
+              mimeType: file.type,
+              bytes: e.target.result.split(',')[1] // Pass file content as base64 string
+            }
+          };
+          google.script.run
+            .withSuccessHandler(function(msg) {
+              alert(msg);
+              google.script.host.close();
+            })
+            .withFailureHandler(function(err) {
+              alert('Error: ' + err.message);
+            })
+            .requestEndorsement(dataObject);
+        };
+        reader.readAsDataURL(file);
+        
+        this.innerHTML = "Processing and Sending...";
+        this.disabled = true;
+      });
+    </script>
+  </body>
+</html>

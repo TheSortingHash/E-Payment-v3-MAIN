@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f6f9; margin: 0; }
+        .header { background-color: #1C2790; color: white; padding: 20px; text-align: center; position: relative; }
+        .header img { height: auto; width: 100%; max-width: 500px; margin-bottom: 10px; }
+        .header h1 { margin: 0; font-size: 22px; font-weight: normal; }
+        .logout-btn { background-color: #CDAE2C; color: #1C2790; padding: 8px 16px; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; font-size: 14px; position: absolute; top: 20px; right: 30px; }
+        .logout-btn:hover { background-color: #b39520; }
+        .container { padding: 20px; }
+        .tabs { display: flex; border-bottom: 2px solid #dee2e6; }
+        .tab-button { padding: 10px 20px; cursor: pointer; border: none; background: none; font-size: 16px; font-weight: bold; color: #495057; }
+        .tab-button.active, .tab-button:hover { color: #1C2790; border-bottom: 2px solid #1C2790; }
+        .tab-content { display: none; padding-top: 20px; }
+        .tab-content.active { display: block; }
+        .table-container { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #dee2e6; }
+        th { background-color: #f8f9fa; color: #495057; }
+        td.amount { text-align: right; }
+        .action-button { background-color: #1C2790; color: white; padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.3s; }
+        .action-button:hover { background-color: #131a63; }
+        .action-button.accent { background-color: #CDAE2C; }
+        .action-button.accent:hover { background-color: #b39520; }
+        .batch-row { cursor: pointer; }
+        .batch-details { display: none; background-color: #f8f9fa; padding-left: 30px; }
+        .batch-links a { margin-right: 15px; color: #1C2790; text-decoration: none; font-weight: bold; }
+        #loader { text-align: center; padding: 50px; font-size: 20px; color: #6c757d; }
+        .search-bar { margin-bottom: 20px; padding: 10px; font-size: 16px; width: 300px; border: 1px solid #ccc; border-radius: 4px;}
+        .dv-link { color: #007bff; text-decoration: underline; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <img src="https://i.imgur.com/jaEbfAR.png" alt="Treasury E-Payment Hub Logo">
+    <h1>DAP Treasury E-Payment Module</h1>
+    <button class="logout-btn" onclick="handleLogout()">Logout</button>
+</div>
+
+<div class="container">
+    <div class="tabs">
+        <button class="tab-button active" onclick="openTab(event, 'ForBatching')">For Batching</button>
+        <button class="tab-button" onclick="openTab(event, 'InProcess')">In-Process Batches</button>
+        <button class="tab-button" onclick="openTab(event, 'Completed')">Completed Batches</button>
+    </div>
+
+    <div id="loader"><i class="fas fa-spinner fa-spin"></i> Loading Data...</div>
+
+    <div id="ForBatching" class="tab-content active">
+        <div class="table-container">
+            <button class="action-button accent" style="margin: 10px;" onclick="createBatch()">Create Batch from Selection</button>
+            <table id="for-batching-table">
+                <thead><tr><th><input type="checkbox" onchange="toggleAllCheckboxes(this)"></th><th>Payee Name</th><th>DV No</th><th>Amount</th><th>Transaction Type</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="InProcess" class="tab-content">
+        <input type="text" id="inProcessSearch" class="search-bar" onkeyup="filterTable('inProcessSearch', 'in-process-table')" placeholder="Search by Batch, Payee, or DV...">
+        <div class="table-container">
+            <table id="in-process-table">
+                <thead><tr><th>Batch Number</th><th>Status</th><th>Total Amount</th><th>Links</th><th>Action</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+    <div id="Completed" class="tab-content">
+        <input type="text" id="completedSearch" class="search-bar" onkeyup="filterTable('completedSearch', 'completed-table')" placeholder="Search by Batch, Payee, or DV...">
+        <div class="table-container">
+            <table id="completed-table">
+                <thead><tr><th>Batch Number</th><th>Status</th><th>Total Amount</th><th>Links</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="action-dialog-backdrop" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:100;">
+    <div id="action-dialog" style="background:white; padding:20px; border-radius:8px; box-shadow:0 4px 8px rgba(0,0,0,0.2); position:fixed; top:50%; left:50%; transform:translate(-50%, -50%);">
+        <h3 id="dialog-title">Action</h3>
+        <div id="dialog-content"></div>
+        <button id="dialog-submit" class="action-button accent">Submit</button>
+        <button onclick="closeDialog()">Cancel</button>
+    </div>
+</div>
+
+<script>
+    // --- SECURITY & LOGOUT ---
+    const sessionToken = new URLSearchParams(window.location.search).get('token');
+    if (sessionToken) sessionStorage.setItem('sessionToken', sessionToken);
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted && !sessionStorage.getItem('sessionToken')) {
+            window.top.location.href = "<?= ScriptApp.getService().getUrl() ?>";
+        }
+    });
+    function handleLogout() {
+        const tokenToInvalidate = sessionStorage.getItem('sessionToken');
+        sessionStorage.removeItem('sessionToken');
+        google.script.run.withSuccessHandler(() => {
+            window.top.location.replace("<?= ScriptApp.getService().getUrl() ?>");
+        }).logoutUser(tokenToInvalidate);
+    }
+
+    // --- UTILITY ---
+    function formatCurrency(num) {
+        if (typeof num !== 'number') return '0.00';
+        return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // --- INITIALIZATION ---
+    document.addEventListener('DOMContentLoaded', loadAllData);
+
+    function loadAllData() {
+        showLoader('Loading Data...');
+        google.script.run.withSuccessHandler(data => {
+            renderForBatchingTable(data.forBatching);
+            renderInProcessTable(data.inProcess);
+            renderCompletedTable(data.completed);
+            hideLoader(); // This was missing the function definition below
+        }).getInitialDataForTreasuryWebApp();
+    }
+
+    // --- TAB & TABLE RENDERING ---
+    function openTab(evt, tabName) {
+        let i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("tab-content");
+        for (i = 0; i < tabcontent.length; i++) { tabcontent[i].style.display = "none"; }
+        tablinks = document.getElementsByClassName("tab-button");
+        for (i = 0; i < tablinks.length; i++) { tablinks[i].className = tablinks[i].className.replace(" active", ""); }
+        document.getElementById(tabName).style.display = "block";
+        evt.currentTarget.className += " active";
+    }
+    
+    function renderForBatchingTable(data) {
+        const tbody = document.querySelector('#for-batching-table tbody');
+        tbody.innerHTML = '';
+        data.forEach(row => {
+            const tr = tbody.insertRow();
+            tr.innerHTML = `
+                <td><input type="checkbox" class="dv-checkbox" value="${row.dvNo}"></td>
+                <td>${row.payeeName}</td>
+                <td><span class="dv-link" onclick="viewDvPdf('${row.dvNo}')">${row.dvNo}</span></td>
+                <td class="amount">${formatCurrency(row.amount)}</td>
+                <td>${row.transType}</td>
+            `;
+        });
+    }
+
+    function renderInProcessTable(data) {
+        const tbody = document.querySelector('#in-process-table tbody');
+        tbody.innerHTML = '';
+        for (const batchNo in data) {
+            const batch = data[batchNo];
+            const tr = tbody.insertRow();
+            tr.className = 'batch-row';
+            tr.setAttribute('data-batch-no', batchNo);
+            tr.onclick = (event) => { if(!event.target.closest('a, button, .dv-link')) toggleBatchDetails(batchNo); };
+            let linksHtml = (batch.findesLink ? `<a href="${batch.findesLink}" target="_blank">FINDES.csv</a>` : '') + (batch.annexHLink ? `<a href="${batch.annexHLink}" target="_blank">Annex H.pdf</a>` : '');
+            let actionButtonHtml = getActionButton(batch.status, batchNo);
+            tr.innerHTML = `<td><i class="fas fa-chevron-right"></i> ${batchNo}</td><td>${batch.status}</td><td class="amount">${formatCurrency(batch.totalAmount)}</td><td class="batch-links">${linksHtml}</td><td>${actionButtonHtml}</td>`;
+            
+            const detailsRow = tbody.insertRow();
+            detailsRow.id = `details-${batchNo}`;
+            detailsRow.className = 'batch-details';
+            let detailsHtml = '<td></td><td colspan="4"><table>';
+            batch.transactions.forEach(t => {
+                detailsHtml += `<tr><td>${t.payeeName}</td><td><span class="dv-link" onclick="viewDvPdf('${t.dvNo}')">${t.dvNo}</span></td><td class="amount">${formatCurrency(t.amount)}</td></tr>`;
+            });
+            detailsHtml += '</table></td>';
+            detailsRow.innerHTML = detailsHtml;
+        }
+    }
+
+    function renderCompletedTable(data) {
+        const tbody = document.querySelector('#completed-table tbody');
+        tbody.innerHTML = '';
+        for (const batchNo in data) {
+            const batch = data[batchNo];
+            const tr = tbody.insertRow();
+            tr.className = 'batch-row';
+            tr.setAttribute('data-batch-no', batchNo);
+            tr.onclick = (event) => { if(!event.target.closest('a, button, .dv-link')) toggleBatchDetails(batchNo, true); };
+            let linksHtml = (batch.findesLink ? `<a href="${batch.findesLink}" target="_blank">FINDES.csv</a>` : '') + (batch.annexHLink ? `<a href="${batch.annexHLink}" target="_blank">Annex H.pdf</a>` : '');
+            tr.innerHTML = `<td><i class="fas fa-chevron-right"></i> ${batchNo}</td><td>${batch.status}</td><td class="amount">${formatCurrency(batch.totalAmount)}</td><td class="batch-links" colspan="2">${linksHtml}</td>`;
+            
+            const detailsRow = tbody.insertRow();
+            detailsRow.id = `details-${batchNo}`;
+            detailsRow.className = 'batch-details';
+            let detailsHtml = '<td></td><td colspan="3"><table>';
+            batch.transactions.forEach(t => {
+                detailsHtml += `<tr><td>${t.payeeName}</td><td><span class="dv-link" onclick="viewDvPdf('${t.dvNo}')">${t.dvNo}</span></td><td class="amount">${formatCurrency(t.amount)}</td></tr>`;
+            });
+            detailsHtml += '</table></td>';
+            detailsRow.innerHTML = detailsHtml;
+        }
+    }
+    
+    function viewDvPdf(dvNo) {
+        event.stopPropagation();
+        showLoader('Fetching PDF...');
+        google.script.run.withSuccessHandler(pdfLink => {
+            hideLoader();
+            if (pdfLink) {
+                window.open(pdfLink, '_blank');
+            } else {
+                alert('No PDF link found for DV ' + dvNo);
+            }
+        }).getPdfLinkForDv(dvNo);
+    }
+
+    function getActionButton(status, batchNo) {
+        switch (status) {
+            case 'Batched for Approval': return `<button class="action-button" onclick="generateFindes('${batchNo}', event)">Generate FINDES</button>`;
+            case 'FINDES Generated': return `<button class="action-button accent" onclick="requestEndorsement('${batchNo}', event)">Request Endorsement</button>`;
+            case 'Pending WeAccess Approval': return `<button class="action-button" onclick="finalizeBatch('${batchNo}', event)">Finalize Batch</button>`;
+            case 'Approved & Emailed': return `<button class="action-button accent" onclick="notifyAccounting('${batchNo}', event)">Notify Accounting</button>`;
+            default: return '';
+        }
+    }
+    
+    function toggleBatchDetails(batchNo, isCompleted = false) {
+        const detailsRow = document.getElementById(`details-${batchNo}`);
+        const icon = document.querySelector(`[data-batch-no="${batchNo}"] i`);
+        if (detailsRow.style.display === 'table-row') {
+            detailsRow.style.display = 'none';
+            icon.className = 'fas fa-chevron-right';
+        } else {
+            detailsRow.style.display = 'table-row';
+            let colSpan = isCompleted ? '4' : '5';
+            detailsRow.firstElementChild.setAttribute('colspan', colSpan);
+            icon.className = 'fas fa-chevron-down';
+        }
+    }
+    
+    function filterTable(inputId, tableId) {
+        const input = document.getElementById(inputId);
+        const filter = input.value.toUpperCase();
+        const table = document.getElementById(tableId);
+        const trs = table.getElementsByTagName("tr");
+        for (let i = 1; i < trs.length; i++) {
+            let row = trs[i];
+            if (row.classList.contains('batch-details')) continue;
+            let detailsRow = document.getElementById(`details-${row.getAttribute('data-batch-no')}`);
+            let text = row.textContent || row.innerText;
+            if (detailsRow) { text += detailsRow.textContent || detailsRow.innerText; }
+            if (text.toUpperCase().indexOf(filter) > -1) {
+                row.style.display = "";
+                if(detailsRow) detailsRow.style.display = row.querySelector('i').classList.contains('fa-chevron-down') ? 'table-row' : 'none';
+            } else {
+                row.style.display = "none";
+                if(detailsRow) detailsRow.style.display = "none";
+            }
+        }
+    }
+    
+    function toggleAllCheckboxes(source) {
+        const checkboxes = document.querySelectorAll('.dv-checkbox');
+        for (const checkbox of checkboxes) { checkbox.checked = source.checked; }
+    }
+    
+    function createBatch() {
+        const selectedDVs = Array.from(document.querySelectorAll('.dv-checkbox:checked')).map(cb => cb.value);
+        if (selectedDVs.length === 0) { alert('Please select at least one DV to batch.'); return; }
+        showLoader('Creating batch...');
+        google.script.run.withSuccessHandler(handleSuccess).createBatchFromWebApp(selectedDVs);
+    }
+    
+    function generateFindes(batchNo, event) {
+        event.stopPropagation();
+        showLoader(`Generating FINDES for ${batchNo}...`);
+        google.script.run.withSuccessHandler(handleFindesResponse).generateFindesForWebApp(batchNo);
+    }
+
+/**
+ * A special handler for the generateFindes response. It can process both
+ * regular success/error messages and the special confirmation request.
+ */
+function handleFindesResponse(response) {
+    if (response.requiresConfirmation) {
+        hideLoader();
+        const userConfirmed = confirm(response.confirmationMessage);
+
+        if (userConfirmed) {
+            showLoader('Proceeding with regular account...');
+            // --- FIX: A more robust way to get the batch number from the message ---
+            const batchNoMatch = response.confirmationMessage.match(/batch number "([^"]+)"/i);
+            if (batchNoMatch && batchNoMatch[1]) {
+                const batchNo = batchNoMatch[1];
+                google.script.run.withSuccessHandler(handleSuccess).generateFindesForWebAppWithOverride(batchNo);
+            } else {
+                // This is a fallback in case the message format changes slightly
+                const fallbackMatch = response.confirmationMessage.match(/batch ([^,.\s]+)/i);
+                if (fallbackMatch && fallbackMatch[1]) {
+                   google.script.run.withSuccessHandler(handleSuccess).generateFindesForWebAppWithOverride(fallbackMatch[1]);
+                } else {
+                    alert('Error: Could not re-confirm batch number. Please try again.');
+                }
+            }
+        }
+        // If user clicks "No", do nothing.
+
+    } else {
+        // If no confirmation is needed, use the standard handler
+        handleSuccess(response);
+    }
+}
+    
+    function requestEndorsement(batchNo, event) {
+        event.stopPropagation();
+        const content = `<label>WeAccess TRN:</label><br><input type="text" id="dialog-ref-no" style="width: 95%"><br><br><label>Payroll Register PDF:</label><br><input type="file" id="dialog-file" accept="application/pdf">`;
+        showDialog('Request Endorsement', content, () => {
+            const refNo = document.getElementById('dialog-ref-no').value;
+            const file = document.getElementById('dialog-file').files[0];
+            if (!refNo || !file) { alert('Please fill all fields.'); return; }
+            showLoader('Validating and Sending Endorsement...');
+            const reader = new FileReader();
+            reader.onload = e => {
+                const fileData = { name: file.name, mimeType: file.type, bytes: e.target.result.split(',')[1] };
+                google.script.run.withSuccessHandler(handleSuccess).requestEndorsementForWebApp(batchNo, refNo, fileData);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    function finalizeBatch(batchNo, event) {
+        event.stopPropagation();
+        const content = `<label>Debit Memo PDF:</label><br><input type="file" id="dialog-file">`;
+        showDialog('Finalize Batch', content, () => {
+            const file = document.getElementById('dialog-file').files[0];
+            if (!file) { alert('Please upload the Debit Memo.'); return; }
+            showLoader('Finalizing batch...');
+            const reader = new FileReader();
+            reader.onload = e => {
+                const fileData = { name: file.name, mimeType: file.type, bytes: e.target.result.split(',')[1] };
+                google.script.run.withSuccessHandler(handleSuccess).finalizeBatchForWebApp(batchNo, fileData);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    function notifyAccounting(batchNo, event) {
+        event.stopPropagation();
+        showLoader('Notifying Accounting...');
+        google.script.run.withSuccessHandler(handleSuccess).notifyAccountingForWebApp(batchNo);
+    }
+
+    function showDialog(title, contentHtml, submitCallback) {
+        document.getElementById('dialog-title').innerText = title;
+        document.getElementById('dialog-content').innerHTML = contentHtml;
+        document.getElementById('dialog-submit').onclick = submitCallback;
+        document.getElementById('action-dialog-backdrop').style.display = 'block';
+    }
+
+    function closeDialog() {
+        document.getElementById('action-dialog-backdrop').style.display = 'none';
+    }
+
+    function handleSuccess(response) {
+        hideLoader();
+        if(response.success){
+            closeDialog();
+            alert(response.message);
+            loadAllData();
+        } else {
+             alert('Error: ' + response.message);
+        }
+    }
+    
+    function showLoader(message) {
+        const loader = document.getElementById('loader');
+        loader.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${message}`;
+        loader.style.display = 'block';
+    }
+
+    // --- FIX: ADD THE MISSING HIDE LOADER FUNCTION ---
+    function hideLoader() {
+        document.getElementById('loader').style.display = 'none';
+    }
+</script>
+</body>
+</html>

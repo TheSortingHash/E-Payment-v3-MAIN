@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .login-container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .logo {
+            max-width: 180px;
+            margin-bottom: 10px;
+        }
+        .system-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #1C2790; /* DAP Blue */
+            margin-bottom: 25px;
+        }
+        .tab-buttons {
+            display: flex;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 20px;
+        }
+        .tab-button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            color: #666;
+        }
+        .tab-button.active {
+            color: #1C2790;
+            border-bottom: 3px solid #1C2790;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        input[type="email"], input[type="password"] {
+            width: calc(100% - 20px);
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 4px;
+            background-color: #1C2790;
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color: 0.3s;
+        }
+        button:hover { background-color: #131a63; }
+        button.accent { background-color: #CDAE2C; }
+        button.accent:hover { background-color: #b39520; }
+        #message { margin-top: 15px; font-weight: bold; }
+        .admin-checkbox { display: flex; align-items: center; justify-content: flex-start; margin-bottom: 20px; color: #555; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <img src="https://coe-psp.dap.edu.ph/wp-content/uploads/2022/06/dap-logo.png" alt="DAP Logo" class="logo">
+        <h2 class="system-title">DAP Treasury E-Payment System</h2>
+        <div class="tab-buttons">
+            <button class="tab-button active" onclick="openTab('login')">Login</button>
+            <button class="tab-button" onclick="openTab('register')">Register</button>
+        </div>
+        <div id="login" class="tab-content active">
+            <input type="email" id="login-email" placeholder="Email Address" required>
+            <input type="password" id="login-password" placeholder="Password" required>
+            <div class="admin-checkbox">
+                <input type="checkbox" id="admin-view-checkbox" style="margin-right: 10px;">
+                <label for="admin-view-checkbox">Open Admin Dashboard</label>
+            </div>
+            <button onclick="handleLogin()">Login</button>
+        </div>
+        <div id="register" class="tab-content">
+            <input type="email" id="register-email" placeholder="DAP Email Address (@dap.edu.ph)" required>
+            <input type="password" id="register-password" placeholder="Choose a Password" required>
+            <input type="password" id="register-confirm-password" placeholder="Confirm Password" required>
+            <button class="accent" onclick="handleRegistration()">Register</button>
+        </div>
+        <div id="message"></div>
+    </div>
+    <script>
+        history.replaceState(null, document.title, "<?= ScriptApp.getService().getUrl() ?>");
+
+        function openTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-button').forEach(button => button.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            event.currentTarget.classList.add('active');
+            document.getElementById('message').textContent = '';
+        }
+
+        function handleLogin() {
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+            const isAdminView = document.getElementById('admin-view-checkbox').checked; // Get checkbox state
+            const messageDiv = document.getElementById('message');
+            if (!email || !password) {
+                messageDiv.textContent = 'Please enter both email and password.';
+                messageDiv.style.color = 'red';
+                return;
+            }
+            messageDiv.textContent = 'Logging in...';
+            messageDiv.style.color = 'blue';
+            // Pass the checkbox state to the backend
+            google.script.run.withSuccessHandler(handleLoginResponse).loginUser(email, password, isAdminView);
+        }
+
+        function handleRegistration() {
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const confirmPassword = document.getElementById('register-confirm-password').value;
+            const messageDiv = document.getElementById('message');
+            if (!email.endsWith('@dap.edu.ph')) {
+                messageDiv.textContent = 'Registration is only for @dap.edu.ph email addresses.';
+                messageDiv.style.color = 'red';
+                return;
+            }
+            if (password.length < 8) {
+                messageDiv.textContent = 'Password must be at least 8 characters long.';
+                messageDiv.style.color = 'red';
+                return;
+            }
+            if (password !== confirmPassword) {
+                messageDiv.textContent = 'Passwords do not match.';
+                messageDiv.style.color = 'red';
+                return;
+            }
+            messageDiv.textContent = 'Registering...';
+            messageDiv.style.color = 'blue';
+            google.script.run.withSuccessHandler(handleRegistrationResponse).registerUser(email, password);
+        }
+
+        function handleLoginResponse(response) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = response.message;
+            messageDiv.style.color = response.success ? 'green' : 'red';
+            if (response.success) {
+                window.top.location.href = response.redirectUrl;
+            }
+        }
+
+        function handleRegistrationResponse(message) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.style.color = message.includes('Success') ? 'green' : 'red';
+        }
+    </script>
+</body>
+</html>

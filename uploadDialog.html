@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+  </head>
+  <body>
+    <div class="block form-group">
+      <label for="file">Select PDF File:</label>
+      <input type="file" id="file" name="file" accept="application/pdf">
+    </div>
+    <div class="block">
+      <button class="action" id="upload-button">Upload and Process</button>
+    </div>
+    <script>
+      document.getElementById('upload-button').addEventListener('click', function() {
+        const file = document.getElementById('file').files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            const dataObject = {
+              name: file.name,
+              mimeType: file.type,
+              file: e.target.result.split(',')[1] // Pass file content as base64 string
+            };
+            google.script.run
+              .withSuccessHandler(function(msg) {
+                if (msg) alert(msg); // Show success message only if one is returned
+                google.script.host.close();
+              })
+              .withFailureHandler(function(error) {
+                alert(error.message);
+                google.script.host.close();
+              })
+              .processUploadedPdf(dataObject);
+          };
+          reader.readAsDataURL(file);
+          this.innerHTML = "Processing...";
+          this.disabled = true;
+        } else {
+          alert('Please select a file first.');
+        }
+      });
+    </script>
+  </body>
+</html>
