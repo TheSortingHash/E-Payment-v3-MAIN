@@ -4,19 +4,19 @@ Automated Financial Middleware for Landbank WeAccess Interoperability
 
 📖 Overview
 
-The DAP E-Payment System is a serverless web application built on Google Workspace (Apps Script) that bridges the gap between the Development Academy of the Philippines (DAP) internal financial records and the Landbank WeAccess Institutional Banking portal.
+The DAP E-Payment System is a serverless web application built on Google Workspace (Apps Script) that bridges the gap between the Development Academy of the Philippines (DAP) internal Financial Management and Information System (FMIS) and the Landbank WeAccess Institutional Banking portal.
 
 It solves the critical problem of manual encoding by automating the ingestion, validation, and file generation processes required for bulk electronic disbursements. It serves as a secure "Traffic Controller," routing tasks between Accounting, Treasury, and Admin roles.
 
 🚀 Key Features
 
-Intelligent Ingestion: OCR-based scanning of Disbursement Vouchers (PDF) to extract Payee, Amount, and Tax data automatically.
+Intelligent Ingestion: OCR-based scanning of System-generated Disbursement Vouchers (PDF) to extract Payee, Amount, and Tax data automatically.
 
 Bank Interoperability: Generates strict-format CSV files (FINDES) compatible with Landbank WeAccess.
 
 Anti-Fraud Validation: Automated auditing that compares the Bank's Payroll Register PDF line-by-line against internal records before payment approval.
 
-Tax Automation: Auto-generates, routes for approval, and digitally signs BIR Form 2307 (Certificate of Creditable Tax Withheld).
+Tax Automation: Auto-generates, routes for approval, and digitally signs BIR Form 2307 (Certificate of Creditable Tax Withheld) for Professional fee disbursements to Resource Persons and Consultants.
 
 Smart Fund Routing: Distinguishes between personal payroll accounts and custodial (Petty Cash/SDO) accounts automatically.
 
