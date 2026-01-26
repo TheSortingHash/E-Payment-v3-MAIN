@@ -47,14 +47,13 @@
             max-width: 800px; 
             max-height: 90vh; 
             overflow-y: auto; 
-            transition: all 0.3s ease; /* smooth transition for split view */
+            transition: all 0.3s ease; 
         }
         
-        /* Split View Class - Triggered when Document Viewer is open */
         .modal-content.split-view {
-            left: 2%; /* Move to left edge */
-            transform: translate(0, -50%); /* Only center vertically */
-            width: 48%; /* Take up left half */
+            left: 2%; 
+            transform: translate(0, -50%); 
+            width: 48%; 
             max-width: none;
         }
 
@@ -99,16 +98,16 @@
 
         /* Document Viewer Panel (Side-by-Side) */
         .doc-viewer-panel {
-            display: none; /* Hidden by default */
+            display: none; 
             position: fixed;
             top: 2%;
             right: 1%;
-            width: 48%; /* Take up right half */
+            width: 48%; 
             height: 96vh;
             background: white;
             border: 1px solid #ccc;
             box-shadow: -2px 0 10px rgba(0,0,0,0.2);
-            z-index: 300; /* Above modal backdrop */
+            z-index: 300; 
             border-radius: 8px;
             flex-direction: column;
         }
@@ -131,6 +130,20 @@
             width: 100%;
             height: 100%;
             border: none;
+        }
+        
+        /* Small icon buttons for table */
+        .icon-btn {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        .icon-btn:hover {
+            background-color: #5a6268;
         }
 
     </style>
@@ -207,6 +220,28 @@
         <div class="card">
             <h2>Pending Final Approval</h2>
             <div id="pendingAdminContainer" style="max-height: 400px; overflow-y: auto;"></div>
+        </div>
+        
+        <div class="card">
+            <h2><i class="fas fa-history"></i> Enrolled History</h2>
+            <p>List of successfully enrolled Resource Persons/Consultants.</p>
+            <input type="text" id="enrolledSearchInput" onkeyup="searchEnrolledTable()" placeholder="Search enrolled payees..." style="width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 20px;">
+            <div id="enrolledContainer" style="max-height: 400px; overflow-y: auto;">
+                <table id="enrolledTable">
+                    <thead>
+                        <tr>
+                            <th>Date Approved</th>
+                            <th>HRIS Name</th>
+                            <th>HRIS No</th>
+                            <th>LBP Account</th>
+                            <th>Email</th>
+                            <th>Endorser</th>
+                            <th>Documents</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </div>
     </div>
     
@@ -343,6 +378,7 @@
     let currentPayees = [];
     let selectedPayeeName = null;
     let allRequests = {};
+    let enrolledList = [];
     
     // RECONCILIATION STATE
     let dbMap = {}; // Will hold { "NAME": "ACCOUNT" } from server
@@ -702,14 +738,22 @@
         google.script.run.withSuccessHandler(handleSuccess).commitReconciliationBatch(payloadNew, payloadUpdate);
     }
     
-    // --- EXTERNAL & SDO (Unchanged) ---
+    // --- EXTERNAL & SDO ---
     function loadEnrollmentRequests() {
         google.script.run.withSuccessHandler(data => {
             allRequests = {};
+            enrolledList = data.enrolled || []; // Store enrolled list
+            
             data.pendingHr.forEach(req => allRequests[req.rowIndex] = req);
             data.pendingAdmin.forEach(req => allRequests[req.rowIndex] = req);
+            // Also store enrolled for reference if needed, though they don't open in edit modal
+            
             renderEnrollmentTable('pendingHrContainer', data.pendingHr, true);
             renderEnrollmentTable('pendingAdminContainer', data.pendingAdmin, false);
+            
+            // Render the new Enrolled Table
+            renderEnrolledTable(enrolledList);
+            
         }).getEnrollmentRequests();
     }
     
@@ -722,6 +766,44 @@
             <td><button class="action-button" onclick='viewRequest(${r.rowIndex},${isHr})'>View</button></td></tr>`;
         });
         c.innerHTML = h + '</tbody></table>';
+    }
+
+    // --- NEW: Render Enrolled Table ---
+    function renderEnrolledTable(list) {
+        const tbody = document.querySelector('#enrolledTable tbody');
+        tbody.innerHTML = '';
+        if (!list || list.length === 0) {
+             tbody.innerHTML = '<tr><td colspan="7">No enrolled payees found.</td></tr>';
+             return;
+        }
+        list.forEach(r => {
+            const tr = tbody.insertRow();
+            
+            // Create Document Buttons
+            let docs = '';
+            if(r.Annex_A_Link) docs += `<button class="icon-btn" onclick="openDocViewer('${r.Annex_A_Link}')" title="View Annex"><i class="fas fa-file-contract"></i></button> `;
+            if(r.Proof_of_Account_Link) docs += `<button class="icon-btn" onclick="openDocViewer('${r.Proof_of_Account_Link}')" title="View Proof"><i class="fas fa-id-card"></i></button>`;
+            if(!docs) docs = '<span style="color:#ccc">None</span>';
+
+            tr.innerHTML = `
+                <td>${r.Date_Approved}</td>
+                <td>${r.HRIS_Formatted_Name}</td>
+                <td>${r.HRIS_Number}</td>
+                <td>${r.LBP_Account_Number}</td>
+                <td>${r.Email_Address}</td>
+                <td>${r.Endorser_Email}</td>
+                <td>${docs}</td>
+            `;
+        });
+    }
+
+    function searchEnrolledTable() {
+        const filter = document.getElementById('enrolledSearchInput').value.toUpperCase();
+        const filtered = enrolledList.filter(p => 
+            (p.HRIS_Formatted_Name && p.HRIS_Formatted_Name.toUpperCase().includes(filter)) ||
+            (p.Surname && p.Surname.toUpperCase().includes(filter))
+        );
+        renderEnrolledTable(filtered);
     }
 
     // --- REVISED viewRequest: Shows Documents Buttons & Unlocks Fields for Admin ---
