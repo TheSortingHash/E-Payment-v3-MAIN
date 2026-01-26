@@ -240,6 +240,7 @@ function _sortPayeeDatabase() {
 /**
  * Fetches all pending enrollment requests for the Admin Web App.
  * It separates requests for HR and for the final Admin approval.
+ * UPDATED: Now also returns 'Enrolled' status rows for historical viewing.
  */
 function getEnrollmentRequests() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Enrollment_Requests');
@@ -248,10 +249,10 @@ function getEnrollmentRequests() {
   
   const pendingHr = [];
   const pendingAdmin = [];
+  const enrolled = [];
 
   const statusCol = headers.indexOf('Status');
-  const timestampCol = headers.indexOf('Timestamp');
-
+  // Loop through data
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     const status = row[statusCol];
@@ -272,10 +273,12 @@ function getEnrollmentRequests() {
       pendingHr.push(request);
     } else if (status === 'Pending Final Approval') {
       pendingAdmin.push(request);
+    } else if (status === 'Enrolled') {
+      enrolled.push(request);
     }
   }
   
-  return { pendingHr, pendingAdmin };
+  return { pendingHr, pendingAdmin, enrolled };
 }
 
 
