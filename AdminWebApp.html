@@ -193,7 +193,13 @@
             </div>
         </div>
         <div class="card">
-            <h2>Payee Database</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <h2 style="margin: 0;">Payee Database</h2>
+                <button class="action-button" style="background-color: #17a2b8; padding: 8px 12px; font-size: 14px;" onclick="exportPayeeCsv()">
+                    <i class="fas fa-file-export"></i> Export Name & Email
+                </button>
+            </div>
+            
             <input type="text" id="searchInput" onkeyup="searchTable()" placeholder="Search for names..." style="width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; margin-bottom: 20px;">
             <div style="max-height: 400px; overflow-y: auto;">
                 <table id="payeeTable">
@@ -490,6 +496,38 @@
         const filter = document.getElementById('searchInput').value.toUpperCase();
         renderPayeeTable(currentPayees.filter(p => p.name.toUpperCase().includes(filter)));
     }
+    
+    // --- NEW: EXPORT CSV FUNCTION ---
+    function exportPayeeCsv() {
+        if (!currentPayees || currentPayees.length === 0) {
+            alert("No data available to export.");
+            return;
+        }
+
+        // Define CSV Header (Renamed columns as requested)
+        let csvContent = "Name,Email\n";
+        
+        // Loop through data and format rows
+        currentPayees.forEach(p => {
+            // Escape quotes in names to prevent CSV breakage
+            const name = p.name ? `"${p.name.replace(/"/g, '""')}"` : "";
+            const email = p.email ? p.email : "";
+            csvContent += `${name},${email}\n`;
+        });
+
+        // Create Blob and trigger download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", "Payee_Database_Email_List.csv");
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    }
 
     // --- RECONCILIATION LOGIC (CLIENT SIDE) ---
     function startReconciliation(event) {
@@ -746,7 +784,6 @@
             
             data.pendingHr.forEach(req => allRequests[req.rowIndex] = req);
             data.pendingAdmin.forEach(req => allRequests[req.rowIndex] = req);
-            // Also store enrolled for reference if needed, though they don't open in edit modal
             
             renderEnrollmentTable('pendingHrContainer', data.pendingHr, true);
             renderEnrollmentTable('pendingAdminContainer', data.pendingAdmin, false);
@@ -768,7 +805,7 @@
         c.innerHTML = h + '</tbody></table>';
     }
 
-    // --- NEW: Render Enrolled Table ---
+    // --- Enrolled Table ---
     function renderEnrolledTable(list) {
         const tbody = document.querySelector('#enrolledTable tbody');
         tbody.innerHTML = '';
