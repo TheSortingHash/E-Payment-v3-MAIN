@@ -34,7 +34,30 @@
         
         /* Modal Styles */
         .modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 200; }
-        .modal-content { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); width: 90%; max-width: 800px; max-height: 90vh; overflow-y: auto; }
+        .modal-content { 
+            position: fixed; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); 
+            width: 90%; 
+            max-width: 800px; 
+            max-height: 90vh; 
+            overflow-y: auto; 
+            transition: all 0.3s ease; /* smooth transition for split view */
+        }
+        
+        /* Split View Class - Triggered when Document Viewer is open */
+        .modal-content.split-view {
+            left: 2%; /* Move to left edge */
+            transform: translate(0, -50%); /* Only center vertically */
+            width: 48%; /* Take up left half */
+            max-width: none;
+        }
+
         .modal-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid #ccc;}
         .modal-close { font-size: 24px; cursor: pointer; border: none; background: none; font-weight: bold; }
 
@@ -56,6 +79,59 @@
         .recon-tab-btn.active { color: #1C2790; border-bottom-color: #1C2790; }
         .recon-view { display: none; }
         .recon-view.active { display: block; }
+        
+        /* Document Link Button */
+        .doc-link-btn { 
+            display: inline-block; 
+            width: 100%; 
+            text-align: center; 
+            text-decoration: none; 
+            background-color: #6c757d; 
+            color: white; 
+            padding: 8px; 
+            border-radius: 4px; 
+            font-size: 14px; 
+            margin-top: 5px;
+            cursor: pointer;
+            border: none;
+        }
+        .doc-link-btn:hover { background-color: #5a6268; }
+
+        /* Document Viewer Panel (Side-by-Side) */
+        .doc-viewer-panel {
+            display: none; /* Hidden by default */
+            position: fixed;
+            top: 2%;
+            right: 1%;
+            width: 48%; /* Take up right half */
+            height: 96vh;
+            background: white;
+            border: 1px solid #ccc;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.2);
+            z-index: 300; /* Above modal backdrop */
+            border-radius: 8px;
+            flex-direction: column;
+        }
+        .doc-viewer-header {
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 8px 8px 0 0;
+        }
+        .doc-viewer-body {
+            flex-grow: 1;
+            overflow: hidden;
+            background-color: #e9ecef;
+            border-radius: 0 0 8px 8px;
+        }
+        .doc-viewer-body iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
 
     </style>
 </head>
@@ -249,6 +325,16 @@
             <button class="modal-close" onclick="closeModal()">&times;</button>
         </div>
         <div id="modal-body" style="padding-top: 20px;"></div>
+    </div>
+</div>
+
+<div id="doc-viewer" class="doc-viewer-panel">
+    <div class="doc-viewer-header">
+        <strong><i class="fas fa-file-alt"></i> Document Preview</strong>
+        <button class="modal-close" style="font-size: 20px;" onclick="closeDocViewer()">&times;</button>
+    </div>
+    <div class="doc-viewer-body">
+        <iframe id="doc-frame" src=""></iframe>
     </div>
 </div>
 
@@ -638,29 +724,78 @@
         c.innerHTML = h + '</tbody></table>';
     }
 
+    // --- REVISED viewRequest: Shows Documents Buttons & Unlocks Fields for Admin ---
     function viewRequest(idx, isHr) {
         const r = allRequests[idx];
         if(!r) return;
-        let html = `<div class="form-grid">`;
+        
+        let html = '';
+
+        // 1. DOCUMENTS SECTION: Auto-detects links and creates buttons for Pop-up Viewer
+        let docsFound = false;
+        let docsHtml = '<div style="margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 5px;"><strong><i class="fas fa-paperclip"></i> Submitted Documents:</strong><div class="form-grid" style="margin-top:10px;">';
+        
+        // Scan object keys for anything that looks like a URL
+        for (const [key, value] of Object.entries(r)) {
+            if (typeof value === 'string' && (value.includes('drive.google.com') || value.includes('docs.google.com'))) {
+                 // Format key name for display (e.g. "Annex_A_Link" -> "Annex A Link")
+                 const label = key.replace(/_/g, ' ');
+                 // Call openDocViewer() instead of href
+                 docsHtml += `<div class="form-group"><button class="doc-link-btn" onclick="openDocViewer('${value}')"><i class="fas fa-eye"></i> View ${label}</button></div>`;
+                 docsFound = true;
+            }
+        }
+        docsHtml += '</div></div>';
+        
+        if (docsFound) {
+            html += docsHtml;
+        } else {
+             html += '<p style="color: #666; font-style: italic; margin-bottom: 20px;">No attached documents found.</p>';
+        }
+
+        // 2. BASIC FIELDS (Now Editable for Admin)
+        const readOnlyAttr = isHr ? 'readonly' : ''; 
+        
+        html += `<div class="form-grid">`;
         ['Surname','First_Name','LBP_Account_Number','Email_Address'].forEach(k => {
-             html += `<div class="form-group"><label>${k.replace(/_/g,' ')}</label><input type="text" value="${r[k]}" readonly></div>`;
+             // We add IDs (e.g., input_Surname) to grab values later
+             html += `<div class="form-group">
+                        <label>${k.replace(/_/g,' ')}</label>
+                        <input type="text" id="input_${k}" value="${r[k]}" ${readOnlyAttr}>
+                      </div>`;
         });
         html += `</div>`;
         
-        // HRIS INPUTS
-        html += `<hr><div class="form-grid"><div class="form-group"><label>HRIS Name</label><input type="text" id="m-hrisName" value="${r.HRIS_Formatted_Name||''}" ${!isHr?'readonly':''}></div>
-        <div class="form-group"><label>HRIS No.</label><input type="text" id="m-hrisNo" value="${r.HRIS_Number||''}" ${!isHr?'readonly':''}></div></div>`;
+        // 3. HRIS INPUTS (Editable for Admin)
+        html += `<hr><div class="form-grid">
+            <div class="form-group">
+                <label>HRIS Name</label>
+                <input type="text" id="m-hrisName" value="${r.HRIS_Formatted_Name||''}" ${isHr ? '' : ''}> 
+            </div>
+            <div class="form-group">
+                <label>HRIS No.</label>
+                <input type="text" id="m-hrisNo" value="${r.HRIS_Number||''}" ${isHr ? '' : ''}>
+            </div>
+        </div>`;
         
-        html += `<div class="button-group">`;
-        if(isHr) html += `<button class="action-button" onclick="subAdmin(${r.rowIndex})">Submit to Admin</button>`;
-        else html += `<button class="action-button accent" onclick='apprEnroll(${JSON.stringify(r)})'>Approve</button>`;
-        html += `<button onclick="closeModal()">Close</button></div>`;
+        // 4. ACTION BUTTONS
+        html += `<div class="button-group" style="justify-content: flex-end;">`;
+        if(isHr) {
+             html += `<button class="action-button" onclick="subAdmin(${r.rowIndex})">Submit to Admin</button>`;
+        } else {
+             // Admin sees "Approve" which now reads the live form data
+             html += `<button class="action-button accent" onclick='apprEnroll(${r.rowIndex})'>Approve & Enroll</button>`;
+        }
+        html += `<button onclick="closeModal()" style="padding: 10px 15px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer;">Close</button></div>`;
         
         document.getElementById('modal-body').innerHTML = html;
         document.getElementById('request-modal').style.display = 'block';
     }
 
-    function closeModal() { document.getElementById('request-modal').style.display = 'none'; }
+    function closeModal() { 
+        document.getElementById('request-modal').style.display = 'none'; 
+        closeDocViewer(); // Close document viewer if open when modal closes
+    }
     
     function subAdmin(idx) {
         const n = document.getElementById('m-hrisName').value;
@@ -670,9 +805,69 @@
         google.script.run.withSuccessHandler(h => handleSuccess(h.message)).submitRequestToAdmin(idx, n, no);
     }
     
-    function apprEnroll(req) {
+    // --- REVISED apprEnroll: Scrapes Editable Fields ---
+    function apprEnroll(rowIndex) {
+        // We get the original request just to have the base structure/keys
+        const originalReq = allRequests[rowIndex];
+        
+        // We create a NEW object with the values currently in the input boxes
+        // This ensures any edits made by Admin are captured.
+        const updatedReq = {
+            rowIndex: rowIndex,
+            Surname: document.getElementById('input_Surname').value.trim(),
+            First_Name: document.getElementById('input_First_Name').value.trim(),
+            LBP_Account_Number: document.getElementById('input_LBP_Account_Number').value.trim(),
+            Email_Address: document.getElementById('input_Email_Address').value.trim(),
+            HRIS_Formatted_Name: document.getElementById('m-hrisName').value.trim(),
+            HRIS_Number: document.getElementById('m-hrisNo').value.trim(),
+            Endorser_Email: originalReq.Endorser_Email // Preserve non-editable fields
+        };
+
+        if(!updatedReq.HRIS_Formatted_Name || !updatedReq.LBP_Account_Number) {
+            return alert("HRIS Name and Account Number are required.");
+        }
+
+        if(!confirm(`Confirm enrollment for ${updatedReq.HRIS_Formatted_Name}?`)) return;
+
         showLoader();
-        google.script.run.withSuccessHandler(h => handleSuccess(h.message)).approveAndEnrollPayee(req);
+        google.script.run.withSuccessHandler(h => handleSuccess(h.message)).approveAndEnrollPayee(updatedReq);
+    }
+
+    // --- DOCUMENT VIEWER LOGIC ---
+    function openDocViewer(url) {
+        // 1. Extract File ID
+        let fileId = null;
+        const match = url.match(/\/d\/(.+?)\//) || url.match(/id=([^&]+)/);
+        if (match) {
+            fileId = match[1];
+        }
+
+        if (!fileId) {
+            alert("Invalid document URL.");
+            return;
+        }
+
+        // 2. Construct Preview URL
+        const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+
+        // 3. Show Viewer and Shift Modal
+        const viewer = document.getElementById('doc-viewer');
+        const frame = document.getElementById('doc-frame');
+        const modal = document.querySelector('.modal-content');
+
+        frame.src = previewUrl;
+        viewer.style.display = 'flex';
+        modal.classList.add('split-view'); // Shifts modal to left
+    }
+
+    function closeDocViewer() {
+        const viewer = document.getElementById('doc-viewer');
+        const frame = document.getElementById('doc-frame');
+        const modal = document.querySelector('.modal-content');
+
+        viewer.style.display = 'none';
+        frame.src = ""; // Clear src to stop memory usage
+        modal.classList.remove('split-view'); // Reset modal position
     }
 
     function loadSdoAccounts() {
