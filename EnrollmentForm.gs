@@ -472,3 +472,124 @@ function addSdoAccount(payeeName, pcfAccount) {
         throw new Error(`Failed to enroll SDO: ${e.message}`);
     }
 }
+
+// [Add this to the bottom of EnrollmentForm.gs]
+
+/**
+ * Rejects an enrollment request, updates the status, and notifies the endorser.
+ * @param {number} rowIndex The row index in the spreadsheet.
+ * @param {string} reason The main reason category.
+ * @param {string} details Specific details added by the Admin.
+ */
+function rejectEnrollmentRequest(rowIndex, reason, details) {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(5000)) {
+        return { success: false, message: "System is busy. Please try again." };
+    }
+
+    try {
+        const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Enrollment_Requests');
+        // Schema: Col B (Index 2) is Status, Col M (Index 13) is Notes, Col O (Index 15) is Endorser_Email
+        // Note: SpreadsheetApp uses 1-based indexing for getRange, but arrays are 0-based.
+        
+        // Fetch specific columns to minimize read ops
+        // Status is Col 2, Surname is Col 3, First is Col 4, Endorser is Col 15
+        const rowData = sheet.getRange(rowIndex, 1, 1, 15).getValues()[0];
+        const surname = rowData[2];
+        const firstName = rowData[3];
+        const endorserEmail = rowData[14]; // Column O
+
+        // Update Status to "Rejected"
+        sheet.getRange(rowIndex, 2).setValue('Rejected');
+
+        // Update Notes (Column M / Index 13) with reason
+        const rejectionNote = `[REJECTED] ${reason}: ${details}`;
+        sheet.getRange(rowIndex, 13).setValue(rejectionNote);
+
+        // Send Email Notification
+        if (endorserEmail) {
+            const payeeName = `${surname}, ${firstName}`;
+            _sendRejectionEmail(endorserEmail, payeeName, reason, details);
+        }
+
+        return { success: true, message: "Request rejected and notification email sent." };
+
+    } catch (e) {
+        return { success: false, message: "Error: " + e.message };
+    } finally {
+        lock.releaseLock();
+    }
+}
+
+/**
+ * Helper function to send the Rejection Email following DAP branding.
+ * Updates: Bolded "Endorser", distinct sections for Reason, Next Steps, and Contact.
+ */
+function _sendRejectionEmail(toEmail, payeeName, reason, details) {
+    const subject = `ACTION REQUIRED: Enrollment Returned - ${payeeName}`;
+    
+    const htmlBody = `
+        <div style="font-family: Arial, sans-serif; font-size: 16px; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd;">
+            
+            <div style="background-color: #1C2790; padding: 20px; text-align: center;">
+                <img src="https://i.imgur.com/jaEbfAR.png" alt="DAP Logo" style="width: 400px; display: block; margin: 0 auto;">
+            </div>
+
+            <div style="padding: 30px; border-top: 5px solid #CDAE2C; background-color: #ffffff;">
+                
+                <h2 style="color: #dc3545; text-align: center; font-weight: bold; text-transform: uppercase; margin-top: 0;">
+                    <i class="fas fa-exclamation-circle"></i> Enrollment Request Returned
+                </h2>
+                
+                <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+
+                <p style="margin-bottom: 20px;">Dear <b>Endorser</b>,</p>
+                
+                <p>We regret to inform you that the payee enrollment request for <b>${payeeName}</b> could not be processed at this time and has been marked as <b style="color: #dc3545;">REJECTED</b>.</p>
+                
+                <div style="background-color: #fff5f5; border-left: 5px solid #dc3545; color: #721c24; padding: 20px; margin: 25px 0;">
+                    <p style="margin: 0; font-size: 14px; text-transform: uppercase; color: #dc3545; font-weight: bold;">Reason for Rejection</p>
+                    <p style="margin: 5px 0 15px 0; font-size: 18px; font-weight: bold;">${reason}</p>
+                    
+                    <p style="margin: 0; font-size: 14px; text-transform: uppercase; color: #dc3545; font-weight: bold;">Admin Remarks</p>
+                    <p style="margin: 5px 0 0 0; font-style: italic;">"${details}"</p>
+                </div>
+
+                <div style="margin-bottom: 25px;">
+                    <h3 style="color: #1C2790; font-size: 16px; margin-bottom: 10px;">Next Steps</h3>
+                    <ul style="padding-left: 20px; color: #555; line-height: 1.5;">
+                        <li>Review the admin remarks above.</li>
+                        <li>Correct the indicated issues (e.g., rescan documents, verify details).</li>
+                        <li>Submit a <b>new enrollment request</b> via the Enrollment Form.</li>
+                    </ul>
+                </div>
+
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #eee;">
+                    <p style="margin: 0; font-size: 14px; font-weight: bold; color: #1C2790;">For clarifications or further assistance:</p>
+                    <p style="margin: 10px 0 0 0;">
+                        <b>Mr. Dean Ancheta</b><br>
+                        <span style="font-size: 14px;">Finance Department</span><br>
+                        <a href="mailto:anchetad@dap.edu.ph" style="color: #1C2790; text-decoration: none; font-weight: bold;">anchetad@dap.edu.ph</a>
+                    </p>
+                </div>
+
+                <p style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">Thank you,</p>
+                <p style="font-weight: bold; color: #1C2790;">Finance Department</p>
+            </div>
+
+            <div style="text-align: center; font-size: 12px; color: #777; padding: 15px; background-color: #f4f6f9; border-top: 1px solid #ddd;">
+                <p style="margin: 0;">This is an automated notification from the DAP E-Payment System.</p>
+                <p style="margin: 5px 0 0 0;">Please do not reply directly to this automated message.</p>
+            </div>
+        </div>
+    `;
+
+    MailApp.sendEmail({
+        to: toEmail,
+        bcc: 'anchetad@dap.edu.ph', // Admin Copy
+        subject: subject,
+        htmlBody: htmlBody,
+        name: 'DAP E-Payment System',
+        replyTo: 'anchetad@dap.edu.ph'
+    });
+}
