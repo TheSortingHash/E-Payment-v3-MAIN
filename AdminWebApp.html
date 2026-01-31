@@ -369,6 +369,41 @@
     </div>
 </div>
 
+<div id="reject-modal" class="modal-backdrop">
+    <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-header">
+            <h2 style="color: #dc3545;"><i class="fas fa-exclamation-circle"></i> Reject Enrollment</h2>
+            <button class="modal-close" onclick="closeRejectModal()">&times;</button>
+        </div>
+        <div style="padding: 20px;">
+            <p>You are about to reject the enrollment request for <b id="reject-payee-name"></b>. This action is irreversible.</p>
+            
+            <input type="hidden" id="reject-row-index">
+            
+            <div class="form-group">
+                <label for="reject-reason">Reason for Rejection <span style="color:red">*</span></label>
+                <select id="reject-reason">
+                    <option value="" disabled selected>-- Select Reason --</option>
+                    <option value="Faded/Unreadable MOV">Faded/Unreadable MOV (Annex A/Proof)</option>
+                    <option value="Detail Mismatch">Details Mismatch (Form vs. Documents)</option>
+                    <option value="Incomplete Documents">Incomplete Documents</option>
+                    <option value="Others">Others (See Remarks)</option>
+                </select>
+            </div>
+            
+            <div class="form-group" style="margin-top: 15px;">
+                <label for="reject-details">Additional Remarks/Details <span style="color:red">*</span></label>
+                <textarea id="reject-details" rows="4" placeholder="Please provide specific details to help the endorser correct the request..."></textarea>
+            </div>
+
+            <div class="button-group" style="justify-content: flex-end; margin-top: 20px;">
+                <button class="action-button" style="background-color: #6c757d;" onclick="closeRejectModal()">Cancel</button>
+                <button class="action-button" style="background-color: #dc3545;" onclick="confirmRejection()">Confirm Reject</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="doc-viewer" class="doc-viewer-panel">
     <div class="doc-viewer-header">
         <strong><i class="fas fa-file-alt"></i> Document Preview</strong>
@@ -411,6 +446,7 @@
     function handleSuccess(message) {
         alert(message);
         closeModal();
+        closeRejectModal(); // Ensure rejection modal is also closed
         resetRecon(); // Reset the reconciliation screen
         loadPayees();
         loadEnrollmentRequests();
@@ -898,14 +934,15 @@
         </div>`;
         
         // 4. ACTION BUTTONS
-        html += `<div class="button-group" style="justify-content: flex-end;">`;
+        html += `<div class="button-group" style="justify-content: flex-end; margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">`;
         if(isHr) {
              html += `<button class="action-button" onclick="subAdmin(${r.rowIndex})">Submit to Admin</button>`;
         } else {
-             // Admin sees "Approve" which now reads the live form data
-             html += `<button class="action-button accent" onclick='apprEnroll(${r.rowIndex})'>Approve & Enroll</button>`;
+             // Admin sees Approve AND Reject
+             html += `<button class="action-button" style="background-color: #dc3545; margin-right: 10px;" onclick="initiateReject(${r.rowIndex}, '${r.Surname}, ${r.First_Name}')"><i class="fas fa-times"></i> Reject</button>`;
+             html += `<button class="action-button accent" onclick='apprEnroll(${r.rowIndex})'><i class="fas fa-check"></i> Approve & Enroll</button>`;
         }
-        html += `<button onclick="closeModal()" style="padding: 10px 15px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer;">Close</button></div>`;
+        html += `<button onclick="closeModal()" style="padding: 10px 15px; border: 1px solid #ccc; background: white; border-radius: 4px; cursor: pointer; margin-left: 10px;">Close</button></div>`;
         
         document.getElementById('modal-body').innerHTML = html;
         document.getElementById('request-modal').style.display = 'block';
@@ -1013,6 +1050,68 @@
         if(!n || !a) return alert('Data missing');
         showLoader();
         google.script.run.withSuccessHandler(handleSuccess).addSdoAccount(n,a);
+    }
+
+    // --- REJECTION LOGIC ---
+
+    function initiateReject(rowIndex, payeeName) {
+        // Set hidden values
+        document.getElementById('reject-row-index').value = rowIndex;
+        document.getElementById('reject-payee-name').innerText = payeeName;
+        
+        // Reset form
+        document.getElementById('reject-reason').value = "";
+        document.getElementById('reject-details').value = "";
+        
+        // Show Reject Modal (on top of the Request Modal)
+        document.getElementById('reject-modal').style.display = 'block';
+    }
+
+    function closeRejectModal() {
+        document.getElementById('reject-modal').style.display = 'none';
+    }
+
+    function confirmRejection() {
+        const rowIndex = document.getElementById('reject-row-index').value;
+        const reason = document.getElementById('reject-reason').value;
+        const details = document.getElementById('reject-details').value.trim();
+
+        if (!reason) {
+            alert("Please select a Reason for Rejection.");
+            return;
+        }
+        if (!details) {
+            alert("Please provide specific details in the Remarks field.");
+            return;
+        }
+
+        if (!confirm("Are you sure you want to reject this request? An email will be sent to the endorser.")) return;
+
+        // UI Loading State
+        const btn = document.querySelector('#reject-modal .action-button[onclick="confirmRejection()"]');
+        const originalText = btn.innerText;
+        btn.innerText = "Processing...";
+        btn.disabled = true;
+
+        google.script.run
+            .withSuccessHandler((res) => {
+                btn.innerText = originalText;
+                btn.disabled = false;
+                if (res.success) {
+                    alert(res.message);
+                    closeRejectModal();
+                    closeModal(); // Close the main request modal too
+                    loadEnrollmentRequests(); // Refresh the list
+                } else {
+                    alert(res.message);
+                }
+            })
+            .withFailureHandler((err) => {
+                btn.innerText = originalText;
+                btn.disabled = false;
+                alert("Error: " + err.message);
+            })
+            .rejectEnrollmentRequest(rowIndex, reason, details);
     }
 </script>
 </body>
