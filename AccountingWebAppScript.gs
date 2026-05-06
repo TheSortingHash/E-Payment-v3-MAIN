@@ -202,6 +202,7 @@ function getTransactionType(particularsText) {
     else if (particulars.includes('loyalty')) transactionType = 'Loyalty Pay';
     else if (particulars.includes('npp')) transactionType = 'Unclaimed Salary - NPP';
     else if (particulars.includes('cos')) transactionType = 'Unclaimed Salary/Overtime Pay - COS';
+    else if (particulars.includes('refund')) transactionType = 'Refund of Payment';
     return transactionType;
 }
 
