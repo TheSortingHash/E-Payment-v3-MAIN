@@ -393,6 +393,9 @@ strings.
 | `ACCOUNTING_HANDOFF_SENT` | Phase 9 send. |
 | `BATCH_CLOSED` | Accounting acknowledges receipt. |
 | `SUB_BATCH_CREATED` | Hold release. |
+| `WEACCESS_UPLOADED` | Maker confirms FINDES uploaded to WeAccess (Phase 5). |
+| `BATCH_CANCELLED` | Admin cancels a `Draft` or `Pending Approval` batch. |
+| `BATCH_NOTIFICATIONS_DRAINED` | All queued notifications for a batch have been sent (drains to status `Notifications Sent`). |
 | `ENROLLMENT_ADD_AUTO_APPROVED` | Maker ADD writes via bridge. |
 | `ENROLLMENT_MODIFY_REQUESTED` | Maker submits MODIFY for Admin approval. |
 | `ENROLLMENT_REMOVE_REQUESTED` | Maker submits REMOVE for Admin approval. |
