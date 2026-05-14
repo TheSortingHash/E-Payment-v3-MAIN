@@ -115,7 +115,8 @@ payroll-type)`. Maker may override; Admin approval for any override
 that breaks monotonic sequence.
 
 **Open:** do PBPOT, COSOT, COSDIF, DIFF follow Mode 1 or Mode 2 of
-their parents? Logged in `OPEN_ITEMS.md`.
+their parents? **Resolved: Mode 1 (sequential).** Only the strict
+quincena payrolls (PBP, COS themselves) use Mode 2.
 
 ---
 
@@ -405,17 +406,23 @@ holds — the Hold button in the review UI is disabled.
 - Held rows can later be released via a **sub-batch** that flows
   through its own Phase 3 → Phase 9.
 
-### 5.3 Sub-batch naming — **open contradiction** (see `OPEN_ITEMS.md`)
+### 5.3 Sub-batch naming — **LOCKED**
 
-Two formats were proposed at different points in planning:
+Format: **`<BatchNo>_<NN>`** where `<NN>` is a zero-padded
+2-digit sequence starting at `02`. Examples:
 
-- **`<BatchNo>_<NN>`** — e.g., `04APBP26_02` (first hold release of
-  `04APBP26`). Earlier-conversation default.
-- **Appended-letter** — e.g., `04APBP26A` releasing into `04APBP26AA`,
-  `04APBP26AB`, … Most recent direct answer in this conversation.
+- Parent batch: `04APBP26`
+- First hold release: `04APBP26_02`
+- Second hold release: `04APBP26_03`
+- …
 
-These cannot both be true. Logged for resolution; rest of spec stays
-neutral on the literal format and refers to "Sub-batch No." abstractly.
+Rationale for starting `<NN>` at `02`: the parent batch is
+implicitly release `01`; sub-batches are subsequent releases of the
+same payroll cycle.
+
+Sub-batches inherit their parent's `Payroll_Type` and `Period_Covered`
+and reference the parent via `Master_Payroll_Batches_<YYYY>.Parent_Batch_No`.
+Sub-batches are stored under `<ParentBatch>/_releases/<SubBatchNo>/` (§6).
 
 ---
 
@@ -871,22 +878,135 @@ HRIS_ID, Before_JSON, After_JSON, Status (PENDING/APPROVED/REJECTED/AUTO_APPROVE
 Decision_At, Decision_By, Decision_Note
 ```
 
-**Write mechanism into Treasury's spreadsheet:** open item — see
-`OPEN_ITEMS.md` #1.
+**Write mechanism into Treasury's spreadsheet — LOCKED:**
+**Option (b) — Treasury-exposed bridge web app.** Treasury publishes a
+small Apps Script web app (`PayeeDatabaseBridge.gs` in the Treasury
+repo) that exposes:
+
+- `GET ?op=lookup&hris_id=<id>` — returns the canonical record
+  (read-only).
+- `POST ?op=add` — body `{ requester, hris_id, name, account, email }` →
+  appends to `Payee_Database`. Returns success + new row index.
+- `POST ?op=modify` — body `{ requester, hris_id, before, after }` →
+  applies the change. Caller (ComBen) is responsible for having
+  already obtained Admin approval before calling this.
+- `POST ?op=remove` — body `{ requester, hris_id, reason }` → marks
+  row removed (soft delete preferred — adds `Removed_At` column).
+
+All POST endpoints:
+- Require a shared secret in the `Authorization` header (stored in
+  `Config.Treasury_Bridge_Token` on the ComBen side, hardcoded
+  via Script Properties on the Treasury side — **never committed**).
+- Server-side normalize account numbers per §11.
+- Append an entry to Treasury's own audit log AND return the entry
+  for ComBen to log on its side (double-ledger).
+- Use `LockService` on `Payee_Database` writes.
+
+ComBen calls these endpoints via `UrlFetchApp.fetch(...)` from
+`PayeeDatabaseBridge.gs` (client-side) in the ComBen repo. The
+ComBen-side wrapper handles retry on 5xx, logs every call to
+`Audit_Log`, and surfaces failure to Admin.
+
+Rationale: cleanest separation of ownership (Treasury controls writes
+to its own database), explicit audit trail on both sides, no shared
+edit access to the Treasury spreadsheet (which would also expose
+Treasury's other sheets).
 
 ---
 
-## 16. Annex H generation — **LOCKED (rules); template TBD**
+## 16. Annex H generation — **LOCKED**
 
-- Generated only after Phase 6 confirms paid records.
-- Built from bank-confirmed subset only (`bank_status=CONFIRMED`).
-- Adapted from Treasury's pattern (Code.gs:676–744):
-  - BUS / Project Code: **blank**.
-  - Nature of Payment: payroll-type label.
-  - Signatory: `Config.Disbursing_Officer_Name` / `_Title` (§14.2).
-- PDF filed to `<Batch>/Annex_H_<BatchNo>.pdf`.
+Reference template: `proposals/ANNEX_H_TEMPLATE.xlsx` (committed alongside
+this spec).
+
+### 16.1 Reference per COA
+
+Form title: **"DAILY REPORT OF E-PAYMENTS FROM AGENCY ACCOUNT
+(ANNEX H OF COA CIRCULAR 2021-014)"**
+
+### 16.2 Header fields
+
+| Field | Source | Example |
+|---|---|---|
+| `Date` | Bank transaction date from CM (Phase 6) | `2025-06-18` |
+| `Report No.` | Auto-generated, format `<YYYY>-<MM>-<NNN>` where `NNN` is a monthly Annex-H counter | `2025-06-010` |
+| `Bank Name` | `Config.Annex_H_Bank_Name` | `Landbank of the Philippines, Pasig Capitol Branch` |
+| `Sheet No.` | `<n.0>` of `<total.0>` (pagination support) | `1.0` |
+
+`Report No.` counter resets per month and is incremented atomically
+under `LockService` on Annex-H generation.
+
+### 16.3 Body columns
+
+```
+e-Payment Details                                  | Payee | DV/Payroll No. | BUS No. | Project Code | Nature of Payment | Amount
+  Date | Issuer | Transaction Reference Number     |       |                |         |              |                   |
+```
+
+| Column | ComBen source |
+|---|---|
+| `Date` (e-Payment Details) | Bank TX date from CM (per row) |
+| `Issuer` | `Config.Annex_H_Issuer` (e.g., `DAP`) |
+| `Transaction Reference Number` | `cm_trn` from line item |
+| `Payee` | Master `Payee Name` from `Payee_Database` (cleaned per §10.6 if needed for display, but Annex H typically shows mixed-case raw name — confirm during build) |
+| `DV/Payroll No.` | `Batch_No` (or `Sub-Batch No.` if this is a release) |
+| `BUS No.` | **blank** (ComBen-wide) |
+| `Project Code` | **blank** (ComBen-wide) |
+| `Nature of Payment` | Payroll-type label from §0.4 (e.g., `Regular Payroll – Plantilla (1st Quincena)`) |
+| `Amount` | `amount_php` (PHP, formatted with thousand separator) |
+
+One row per bank-confirmed payee in the batch. Excluded rows:
+- `bank_status != CONFIRMED` (NOT_PAID, etc.)
+- `status == HOLD` rows from the parent batch (they generate their own
+  Annex H when released as sub-batches).
+
+### 16.4 Footer
+
+```
+TOTAL: <sum of Amount column>
+
+I HEREBY CERTIFY ON MY OFFICIAL OATH THAT THE ABOVE IS A TRUE STATEMENT
+OF ALL E-PAYMENTS DURING THE PERIOD STATED ABOVE IN THE AMOUNTS SHOWN
+THEREON.
+
+                                        <Disbursing Officer Name>
+                                        NAME AND SIGNATURE OF DISBURSING OFFICER/
+                                        CASHIER/AUTHORIZED OFFICER
+```
+
+- `<Disbursing Officer Name>`: `Config.Disbursing_Officer_Name`
+  (default: `MARIA MONICA O. TALAN`).
+- Optional digital signature: if `Config.Disbursing_Officer_Signature_FileId`
+  is set, insert image above the name line.
+
+### 16.5 Output
+
+- Generated as PDF from a Google Doc / Sheet template (TBD between the
+  two; Sheet template is closer to source — preferred).
+- Filed at `<Batch>/Annex_H_<BatchNo>.pdf`.
 - `Annex_H_File_ID` written to batch row.
-- Visual template: TBD — match Treasury's Annex H layout.
+- `LockService` on `Master_Payroll_Batches_<YYYY>` while reserving the
+  `Report No.` counter.
+
+### 16.6 Pagination
+
+If row count exceeds the per-page capacity (TBD during build —
+estimate ~25 rows per page based on Treasury's Annex H), produce
+multiple sheets numbered `1.0` / `2.0` / `<total>.0` in the
+`Sheet No.` header. Each sheet has its own footer with totals (page +
+running). Final sheet has the certification block.
+
+### 16.7 Adapted from Treasury
+
+Implementation pattern adapted from `Code.gs:676–744`
+(Treasury Annex H generator) with these ComBen-specific changes:
+
+- BUS No. / Project Code: always blank.
+- DV column → DV/Payroll No. column holds `Batch_No`.
+- Nature of Payment → payroll-type label.
+- Signatory: from `Config` (decoupled from Treasury's hardcoding).
+- Pagination support (Treasury's current generator may handle single
+  sheet only — verify and extend).
 
 ---
 
