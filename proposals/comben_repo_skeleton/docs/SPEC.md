@@ -41,17 +41,23 @@ fields we need (1,427 rows currently):
 | Column | Purpose |
 |---|---|
 | Payee Name | Display + Landbank name field |
-| Landbank Account | Account number (leading zeros may be stripped — see §11) |
+| Landbank Account | Account number — **10 digits**, leading zeros may be stripped (see §11) |
 | Email Address | Payee notification address |
-| HRIS Number | Primary key used by ComBen |
+| HRIS Number | Primary key used by ComBen — **6 digits**, leading zeros may be stripped (see §11) |
 
-- **Lookup key for ComBen: HRIS Number** (10-digit string with leading
-  zeros, e.g., `0677068248`).
+- **Lookup key for ComBen: HRIS Number** (6-digit string, leading zeros
+  preserved via padding — see §11).
 - ComBen reads `Payee_Database` via a read-only bridge.
 - ComBen's enrollment module routes ADD writes directly and REMOVE /
   MODIFY through an Admin-approval queue (§15).
 - This is a real simplification of the original "build a separate
   HRIS_Master" plan.
+
+**Edge case — non-DAP payees.** Treasury's `Enrollment_Requests` has
+`HRIS_Number = "N/A"` rows (e.g., external consultants). These should
+not appear in ComBen batches — ComBen is for DAP employee payroll
+only. Upload validation in Phase 2 hard-blocks any `HRIS_ID` that does
+not resolve to a numeric (post-padding) value in `Payee_Database`.
 
 ### 0.4 Canonical payroll types and batch codes — **LOCKED**
 
@@ -218,7 +224,7 @@ Three columns. No metadata sheet. No instruction sheet.
 
 | Column | Type | Notes |
 |---|---|---|
-| `HRIS_ID` | text (10 chars, leading zeros preserved) | Lookup key into `Payee_Database` |
+| `HRIS_ID` | text (6 chars, leading zeros preserved) | Lookup key into `Payee_Database`. Normalized to 6-char zero-padded on every read (§11). |
 | `HRIS_Name` | text | Compared against master; mismatch surfaced in review UI |
 | `Amount` | decimal PHP | Net-pay amount; converted to centavos at FINDES time |
 
@@ -610,7 +616,8 @@ drifted copies; ComBen will not repeat this mistake.)
 ### 10.3 Account-number lookup
 
 1. Look up account in `Payee_Database` keyed on **`HRIS_ID`** (the
-   `HRIS Number` column).
+   `HRIS Number` column). Both sides normalized to 6-char zero-padded
+   text before compare (§11).
 2. If not found → throw with message:
    `"A valid bank account could not be found for HRIS_ID \"<id>\" (\"<name>\"). Please ensure this employee is enrolled in Payee_Database before regenerating."`
 3. **No SDO_PCF_Accounts fallback** — PCF and Revolving-Fund flows
@@ -732,30 +739,62 @@ After successful save:
 
 ## 11. Leading-zero handling — **LOCKED**
 
+Two distinct fields are affected. Both have the same root cause
+(Sheets numeric coercion on text-like IDs) and the same fix shape
+(normalize on every read and write, force `@` text format).
+
+### 11.1 Landbank Account — 10 digits
+
 Confirmed live bug in Treasury's `Payee_Database`:
 
 ```
-Row 3:  677068248.0     ← stored as number, leading 0 LOST
-Row 4:  '5897028915'    ← stored as text, intact
-Row 5:  '0677188472'    ← stored as text, leading 0 PRESERVED
+Row 3:  677068248.0     ← stored as number, leading 0 LOST    → should be 0677068248
+Row 4:  '5897028915'    ← stored as text, intact              → 5897028915 (no leading 0)
+Row 5:  '0677188472'    ← stored as text, leading 0 PRESERVED → 0677188472
 Row 2:  1507060419.0    ← number (no leading zero, OK by coincidence)
 ```
 
-The database is inconsistent. Fix is **normalize on every read and
-every write**:
+Normalize on every read and write: `String(acct).padStart(10, '0')`.
 
-| Surface | Policy |
-|---|---|
-| ComBen bridge read | Every account coerced to 10-char zero-padded string: `String(acct).padStart(10,'0')` |
-| `setupComBenSchema()` | Applies `setNumberFormat('@')` (text) on Account column of any ComBen-owned sheet |
-| FINDES writer (§10) | Emits 10-char strings, always, after the safety-stop |
-| CM parser (§4) | Normalizes destination accounts same way before compare |
-| Enrollment module (§15) | All ADD / MODIFY writes pass through normalizer |
+### 11.2 HRIS Number — 6 digits
 
-This is also surfaced to Admin: a "Health" panel can show count of
-`Payee_Database` rows whose stored representation differs from the
-normalized form, with a "Heal" button (admin-only) that rewrites the
-cell as text.
+Same problem, smaller width. From real `Payee_Database` rows:
+
+```
+Row 2:  209803.0   → 209803 (6 digits)
+Row 3:  205816.0   → 205816
+Row 4:  213646     → 213646  (text)
+Row 5:  213649     → 213649
+Row 6:  200012.0   → 200012
+```
+
+None of the sampled rows currently start with `0`, but the format
+permits leading zeros (per project owner). Any future HRIS issued in
+the `0xxxxx` range would be silently truncated by Sheets to 5 digits.
+
+Normalize on every read and write: `String(hrisId).padStart(6, '0')`.
+
+### 11.3 Combined policy
+
+| Surface | Account policy | HRIS_ID policy |
+|---|---|---|
+| `Payee_Database` bridge read | `padStart(10, '0')` | `padStart(6, '0')` |
+| Upload file read (HRIS_ID column) | n/a — file doesn't carry account | `padStart(6, '0')` |
+| `setupComBenSchema()` | `setNumberFormat('@')` on Account cols | `setNumberFormat('@')` on HRIS_ID cols |
+| FINDES writer (§10) | 10-char string, always | n/a — FINDES output has no HRIS column |
+| CM parser (§4) | Normalize destination accounts | n/a |
+| Enrollment module (§15) | Pad before write | Pad before write |
+
+### 11.4 Admin health panel
+
+Health panel shows:
+- Count of `Payee_Database` rows whose `Landbank Account` stored
+  representation differs from `padStart(10, '0')` form.
+- Count of `Payee_Database` rows whose `HRIS Number` stored
+  representation differs from `padStart(6, '0')` form.
+- "Heal" button (admin-only) rewrites the offending cells as text
+  through the bridge (§15). Each healed row gets a `Healed_At`
+  timestamp in the audit ledger.
 
 ---
 
