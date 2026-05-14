@@ -4,9 +4,115 @@
 > with the project owner before they are filled in. Do not implement against
 > this document until every section is marked **Locked**.
 
-## 0. Scope and non-goals
+## 0. Scope and non-goals — **LOCKED**
 
-**[TO BE DRAFTED]**
+### 0.1 In scope
+
+- Disbursement of compensation & benefits payroll items to government
+  employees via Landbank FINDES upload.
+- One payroll type per batch (per the canonical table in §0.4).
+- End-to-end workflow: roster intake → validation → batch assembly →
+  FINDES generation → endorsement → CM cross-reference → release →
+  accounting handoff → archival.
+- Roles: Maker, Admin, Authorizer, Accounting.
+- Google Sheets backend + Apps Script web app + Google Drive for
+  artifacts.
+- **Payee enrollment module** inside ComBen web app:
+  - **ADD payee:** Maker writes directly to `Payee_Database` (auto-allowed).
+  - **REMOVE payee:** requires Admin approval.
+  - **MODIFY name, account-number, or Landbank account:** requires Admin
+    approval.
+  - All writes target Treasury-owned `Payee_Database` (§0.3).
+
+### 0.2 Non-goals
+
+- DV-style disbursements — handled by Treasury E-Payment v3.
+- PCF replenishment / Revolving Fund establishment — DV-only.
+- Tax / GSIS / PhilHealth / Pag-IBIG deduction computation. **ComBen
+  receives net-pay amounts** already computed upstream by HR/Payroll.
+- General-ledger posting — ComBen produces the handoff package;
+  Accounting team posts in their own system.
+
+### 0.3 Payee_Database ownership — **LOCKED**
+
+- **Treasury owns `Payee_Database`.**
+- ComBen's enrollment module writes into Treasury's `Payee_Database`
+  (shared spreadsheet, or bridge service — mechanism deferred to
+  `OPEN_ITEMS.md`).
+- Read path: ComBen reads the same `Payee_Database` for FINDES account
+  lookup (§10.3).
+
+### 0.4 Canonical payroll types and batch codes — **LOCKED**
+
+Batch number format: `[mm][L][CODE][yy]`
+
+- `[mm]` — 2-digit month (`01`–`12`)
+- `[L]`  — batch letter (see §0.5)
+- `[CODE]` — payroll-type code from the table below
+- `[yy]` — 2-digit year
+
+| # | Payroll Type | Code |
+|---|---|---|
+| 1 | RATA | RT |
+| 2 | Communication Expenses | CE |
+| 3 | Regular Payroll – Plantilla | PBP |
+| 4 | Regular Payroll – COS | COS |
+| 5 | Monetization | MON |
+| 6 | Loyalty Pay | LOYA |
+| 7 | Step Increment Differential | SI |
+| 8 | Promotion Differential | PRO |
+| 9 | RATA OIC | RTOIC |
+| 10 | Service Charge | SC |
+| 11 | Mid Year Bonus | MYB |
+| 12 | Year End Bonus and Cash Gift | YEBCG |
+| 13 | Productivity Enhancement Incentive | PEI |
+| 14 | Service Recognition Incentive | SRI |
+| 15 | Performance Based Bonus | PBB |
+| 16 | Loan Refund | REF |
+| 17 | Landbank Loan Refund | LBP |
+| 18 | Overtime Payroll – Plantilla | PBPOT |
+| 19 | Overtime Payroll – COS | COSOT |
+| 20 | Differential – COS | COSDIF |
+| 21 | Differential – PBP | DIFF |
+| 22 | Gratuity Pay | GRA |
+| 23 | Token | TOKEN |
+
+**Note on COSDIF:** the source naming-convention sheet showed `[mm]COSDIF[yy]`
+(no batch letter). This was a typo in the sheet; COSDIF **does take a
+batch letter** like every other payroll type, i.e., `[mm][L]COSDIF[yy]`.
+
+### 0.5 Batch-letter convention — **LOCKED**
+
+The batch letter `[L]` resets to `A` at the start of each month for each
+payroll type, scoped to `(month, payroll-type)`. So `05ART26` and `05APEI26`
+both legitimately start at `A` in May 2026 — they are independent counters.
+
+Two assignment modes:
+
+**Mode 1 — Sequential (default, applies to all payroll types except
+Regular Payroll – Plantilla and Regular Payroll – COS):**
+
+- First batch of the month: `A`.
+- Subsequent batches the same month: `B`, `C`, …
+
+**Mode 2 — Quincena-keyed (applies to Regular Payroll – Plantilla
+[PBP] and Regular Payroll – COS [COS]):**
+
+- `A` = 1st Quincena (first-half-of-month payroll).
+- `B` = 2nd Quincena (second-half-of-month payroll).
+- **Sub-batches:** if the 1st Quincena needs to be split (e.g., a held
+  group released later), append an additional letter to form
+  `AA`, `AB`, `AC`, …; same pattern for 2nd Quincena
+  → `BA`, `BB`, `BC`, …
+
+The system auto-suggests the next letter at batch creation time based
+on existing batches in `Master_Payroll_List` for the same `(month,
+payroll-type)`. Maker may override; Admin approval required for any
+override that breaks monotonic sequence.
+
+**Open:** do **Overtime – Plantilla (PBPOT)** and **Overtime – COS (COSOT)**
+follow Mode 1 or Mode 2? Same question for the Differentials (DIFF,
+COSDIF). Logged in `OPEN_ITEMS.md`.
 
 ## 1. Workflow — 9 phases
 
@@ -54,19 +160,24 @@ Acknowledgment + reason are written to `Audit_Log`.
 
 **[TO BE DRAFTED]**
 
-## 6. Drive folder layout
-
-**[TO BE DRAFTED]** — inherits Treasury convention:
+## 6. Drive folder layout — **LOCKED (structure); contents TBD**
 
 ```
 <ComBenRoot>/
-  YYYY/
-    MM-MonthName/
+  20<yy>/
+    <mm>-MonthName/
       BATCH-<batchNo>/
         FINDES-<batchNo>.csv
         PayrollRegister-<batchNo>.pdf
         Endorsement-<batchNo>.pdf
-        ... (other batch artifacts)
+        ... (other batch artifacts, TBD)
+```
+
+Year and month are derived from the parsed `batchNo` (§0.4 format).
+Example for `04BRT26`:
+
+```
+<ComBenRoot>/2026/04-April/BATCH-04BRT26/FINDES-04BRT26.csv
 ```
 
 ## 7. Email templates
@@ -214,8 +325,10 @@ Integer centavos, no decimal point, no thousands separator.
   rename existing file to `FINDES-<batchNo>.bak-<YYYYMMDD-HHMMSS>.csv`,
   then write new file. (Treasury currently creates duplicates on
   regenerate; ComBen does not.)
-- `batchNo` format: `YYYY-MM-NNN` (e.g. `2026-05-001`). Parsing
-  splits on `-`; month index resolves via the `monthNames` array.
+- `batchNo` format: `[mm][L][CODE][yy]` (§0.4). Parsing extracts
+  `mm` (first 2 chars), `yy` (last 2 chars), and the middle segment
+  (letter(s) + code). The 4-digit year resolves as `20<yy>`; month index
+  resolves via the `monthNames` array (`mm` 1-indexed).
 
 ### 10.10 Status update
 
@@ -248,6 +361,19 @@ record.
 Script-Properties-stored secrets; no client-side trust; audit trail
 coverage.
 
-## 15. Open items
+## 15. Payee enrollment module — **[TO BE DRAFTED]**
+
+Scope locked (§0.1):
+
+- **ADD payee:** Maker writes directly to Treasury-owned `Payee_Database`
+  (auto-approved, but logged in `Audit_Log` with actor + timestamp).
+- **REMOVE payee:** request created by Maker, Admin approval required
+  before write.
+- **MODIFY name, account-number, or Landbank account:** request created
+  by Maker, Admin approval required before write.
+- Mechanism of write into Treasury-owned spreadsheet TBD (direct
+  `openById` write vs. bridge service) — see `OPEN_ITEMS.md`.
+
+## 16. Open items
 
 See `OPEN_ITEMS.md`.
