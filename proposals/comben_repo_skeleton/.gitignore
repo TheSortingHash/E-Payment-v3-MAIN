@@ -1,0 +1,21 @@
+# Apps Script local development
+.clasp.json
+.clasprc.json
+node_modules/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local secrets — never commit
+*.env
+*.env.local
+credentials*.json
+service-account*.json
+
+# Generated / scratch
+*.log
+*.tmp
+scratch/
