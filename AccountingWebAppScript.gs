@@ -227,7 +227,8 @@ function analyzeJevForTax(text) {
     // --- FIX 1: Search Multiple Expense Codes for Tax Base ---
     // Add any other Expense Account Codes you encounter here
     const possibleBaseCodes = [
-        '5-02-11-990-01', // Other Professional Services
+        '5-02-11-990-01',// Other Professional Services
+        '5-02-02-010-01',  // Training Expenses
         '5-02-11-030-01'  // Consultancy Services (Found in your DV)
     ];
 
