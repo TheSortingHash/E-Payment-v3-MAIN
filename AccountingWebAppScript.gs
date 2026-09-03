@@ -227,7 +227,8 @@ function analyzeJevForTax(text) {
     // --- FIX 1: Search Multiple Expense Codes for Tax Base ---
     // Add any other Expense Account Codes you encounter here
     const possibleBaseCodes = [
-        '5-02-11-990-01', // Other Professional Services
+        '5-02-11-990-01',// Other Professional Services
+        '5-02-02-010-01',  // Training Expenses
         '5-02-11-030-01'  // Consultancy Services (Found in your DV)
     ];
 
@@ -330,8 +331,8 @@ function logTaxCertData(data) {
 // ==========================================
 
 const TAX_TEMPLATE_ID = '1vgvObxctWAM2ixQA3wDIcbF6gcs6Y6PC4YdsE4MBJrk'; 
-const SIGNATURE_FILE_ID = '1MGB6LX0n2QnOfdItvVn8nJeI3x29dkAn'; 
-const ACCOUNTANT_EMAIL = 'preciadosr@dap.edu.ph';
+const SIGNATURE_FILE_ID = '1IxKR4T25-Z3b9mPm0KU2XGk5Xq-4CvZH'; 
+const ACCOUNTANT_EMAIL = 'barawidana@dap.edu.ph';
 
 function generateTaxCert(dvNo, isFinal = false) {
   let tempFile = null;

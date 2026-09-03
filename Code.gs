@@ -507,8 +507,8 @@ function requestEndorsement(dataObject) {
     }
 
     if (batchTransactions.length > 0) {
-    const recipient = 'gudoyj@dap.edu.ph,barawidana@dap.edu.ph,casalann@dap.edu.ph,dogeliop@dap.edu.ph,calinal@dap.edu.ph' ; // Replace with actual authorizer emails
-    const ccrecipient = 'gonzagaj@dap.edu.ph,nolascom@dap.edu.ph,set@dap.edu.ph,medinor@dap.edu.ph,tomolingj@dap.edu.ph';
+    const recipient = 'gudoyj@dap.edu.ph,barawidana@dap.edu.ph,dogeliop@dap.edu.ph,calinal@dap.edu.ph' ; // Replace with actual authorizer emails
+    const ccrecipient = 'gamboac@dap.edu.ph,nolascom@dap.edu.ph,set@dap.edu.ph,medinor@dap.edu.ph,tomolingj@dap.edu.ph';
     const bccrecipient = 'cashtreasury@dap.edu.ph,anchetad@dap.edu.ph'
     const subject = `For WeAccess Approval: E-Payment Batch ${batchNo}`;
         
