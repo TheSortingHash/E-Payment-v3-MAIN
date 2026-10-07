@@ -331,7 +331,7 @@ function logTaxCertData(data) {
 // ==========================================
 
 const TAX_TEMPLATE_ID = '1vgvObxctWAM2ixQA3wDIcbF6gcs6Y6PC4YdsE4MBJrk'; 
-const SIGNATURE_FILE_ID = '1IxKR4T25-Z3b9mPm0KU2XGk5Xq-4CvZH'; 
+const SIGNATURE_FILE_ID = '1OFPsG9WEb_3YY7gBE7jVpq-7BPHejoeQ'; 
 const ACCOUNTANT_EMAIL = 'barawidana@dap.edu.ph';
 
 function generateTaxCert(dvNo, isFinal = false) {
