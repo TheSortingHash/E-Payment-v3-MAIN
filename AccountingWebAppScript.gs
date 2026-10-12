@@ -753,6 +753,22 @@ function sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl) {
     : v;
   const fileBlob = DriveApp.getFileById(getIdFromUrl(pdfUrl)).getBlob();
 
+  // Same business-tax rule as fillTaxCertTemplate(): VAT if any, otherwise Percentage Tax.
+  const cell = 'padding: 12px; border: 1px solid #ddd;';
+  const amountEwt = parseFloat(taxData['EWT Amount']) || 0;
+  const amountVat = parseFloat(taxData['VAT Amount']) || 0;
+  const amountPtax = parseFloat(taxData['PTax Amount']) || 0;
+  let businessTaxRow = '';
+  let businessTax = 0;
+  if (amountVat > 0) {
+    businessTax = amountVat;
+    businessTaxRow = `<tr><td style="${cell} font-weight: bold;">VAT Withheld (WV022):</td><td style="${cell}">PHP ${fmt(amountVat)}</td></tr>`;
+  } else if (amountPtax > 0) {
+    businessTax = amountPtax;
+    businessTaxRow = `<tr><td style="${cell} font-weight: bold;">Percentage Tax Withheld (WB080):</td><td style="${cell}">PHP ${fmt(amountPtax)}</td></tr>`;
+  }
+  const totalWithheld = Math.round((amountEwt + businessTax) * 100) / 100;
+
   const htmlBody = `
     <div style="font-family: Arial, sans-serif; font-size: 16px; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd;">
         <div style="background-color: #1C2790; padding: 20px; text-align: center;">
@@ -763,9 +779,11 @@ function sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl) {
             <p>Dear <b>${payeeName}</b>,</p>
             <p>Further to the fund transfer confirmation sent to you for this transaction, please find attached your signed <b>BIR Form 2307</b> (Certificate of Creditable Tax Withheld at Source). Please see the details below.</p>
             <table style="width: 100%; border-collapse: collapse; margin-top: 25px; margin-bottom: 25px;">
-                <tr style="background-color: #f2f2f2;"><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Tax Withheld:</td><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold; font-size: 1.1em; color: #1C2790;">PHP ${fmt(taxData['EWT Amount'])}</td></tr>
-                <tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Tax Base:</td><td style="padding: 12px; border: 1px solid #ddd;">PHP ${fmt(taxData['Tax Base'])}</td></tr>
-                <tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">DV Number:</td><td style="padding: 12px; border: 1px solid #ddd;">${dvNo}</td></tr>
+                <tr style="background-color: #f2f2f2;"><td style="${cell} font-weight: bold;">Total Tax Withheld:</td><td style="${cell} font-weight: bold; font-size: 1.1em; color: #1C2790;">PHP ${fmt(totalWithheld)}</td></tr>
+                <tr><td style="${cell} font-weight: bold;">Expanded Withholding Tax (${taxData['ATC Code']}):</td><td style="${cell}">PHP ${fmt(amountEwt)}</td></tr>
+                ${businessTaxRow}
+                <tr><td style="${cell} font-weight: bold;">Tax Base:</td><td style="${cell}">PHP ${fmt(taxData['Tax Base'])}</td></tr>
+                <tr><td style="${cell} font-weight: bold;">DV Number:</td><td style="${cell}">${dvNo}</td></tr>
             </table>
             <p>Please keep this certificate for your tax filing. If any detail on the certificate is incorrect, please notify the Treasury Division by replying to this email, or call local 136.</p>
             <p style="margin-top: 30px;">Thank you,</p><p><b>Finance Department</b></p>
