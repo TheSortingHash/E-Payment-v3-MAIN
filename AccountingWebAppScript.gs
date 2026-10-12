@@ -706,8 +706,9 @@ function handleTaxCertDelivery(dvNo) {
   const taxLinkIdx = headers.indexOf('Tax Cert Link');
   const nameIdx = headers.indexOf('Payee Name');
   const statusIdx = headers.indexOf('Status');
+  const batchIdx = headers.indexOf('Batch No');
 
-  let rowIdx = -1, paymentSent = false, payeeName = '';
+  let rowIdx = -1, paymentSent = false, payeeName = '', batchNo = '';
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][dvIdx].toString() === dvNo.toString()) {
@@ -718,6 +719,7 @@ function handleTaxCertDelivery(dvNo) {
       paymentSent = status === 'Approved & Emailed' || status === 'Completed' ||
                     (payTimeIdx > -1 && !!data[i][payTimeIdx]);
       payeeName = data[i][nameIdx];
+      batchNo = batchIdx > -1 ? data[i][batchIdx] : '';
       break;
     }
   }
@@ -734,7 +736,7 @@ function handleTaxCertDelivery(dvNo) {
     const email = payeeRow ? payeeRow[2] : ''; 
 
     if (email) {
-      sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl);
+      sendTaxCertToPayee(email, payeeName, dvNo, batchNo, taxData, pdfUrl);
       return "Fund transfer already sent. Tax Certificate emailed to Payee.";
     }
     return "Fund transfer sent, but Payee Email not found.";
@@ -744,10 +746,10 @@ function handleTaxCertDelivery(dvNo) {
 
 /**
  * Sends the signed BIR Form 2307 to a payee whose fund transfer email already went out.
- * Same layout as sendPayeeEmails() in Code.gs, and the same subject so it threads with
+ * Same layout as sendPayeeEmails() in Code.gs, and the same batch subject so it threads with
  * the payee's Fund Transfer Confirmation.
  */
-function sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl) {
+function sendTaxCertToPayee(email, payeeName, dvNo, batchNo, taxData, pdfUrl) {
   const fmt = (v) => (typeof v === 'number')
     ? v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : v;
@@ -795,7 +797,9 @@ function sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl) {
   MailApp.sendEmail({
     to: email,
     bcc: 'balcen@dap.edu.ph,anchetad@dap.edu.ph',
-    subject: `DAP Fund Transfer Confirmation (DV No. ${dvNo})`,
+    subject: batchNo
+      ? `DAP Fund Transfer Confirmation (Batch ${batchNo})`
+      : `DAP Fund Transfer Confirmation (DV No. ${dvNo})`,
     htmlBody: htmlBody,
     name: 'DAP E-Payment System',
     replyTo: 'cashtreasury@dap.edu.ph',
