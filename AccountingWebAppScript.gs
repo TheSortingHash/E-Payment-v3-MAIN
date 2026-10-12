@@ -705,13 +705,18 @@ function handleTaxCertDelivery(dvNo) {
   const payTimeIdx = headers.indexOf('Payment Timestamp');
   const taxLinkIdx = headers.indexOf('Tax Cert Link');
   const nameIdx = headers.indexOf('Payee Name');
-  
+  const statusIdx = headers.indexOf('Status');
+
   let rowIdx = -1, paymentSent = false, payeeName = '';
 
   for (let i = 1; i < data.length; i++) {
     if (data[i][dvIdx].toString() === dvNo.toString()) {
       rowIdx = i + 1;
-      paymentSent = !!data[i][payTimeIdx];
+      // The payee email goes out when the batch is finalized ("Approved & Emailed", later "Completed").
+      // Nothing writes 'Payment Timestamp', so the status is the reliable signal.
+      const status = statusIdx > -1 ? data[i][statusIdx] : '';
+      paymentSent = status === 'Approved & Emailed' || status === 'Completed' ||
+                    (payTimeIdx > -1 && !!data[i][payTimeIdx]);
       payeeName = data[i][nameIdx];
       break;
     }
@@ -729,18 +734,55 @@ function handleTaxCertDelivery(dvNo) {
     const email = payeeRow ? payeeRow[2] : ''; 
 
     if (email) {
-      const fileBlob = DriveApp.getFileById(getIdFromUrl(pdfUrl)).getBlob();
-      MailApp.sendEmail({
-        to: email,
-        subject: `Additional Attachment: Tax Certificate (DV ${dvNo})`,
-        htmlBody: `<p>Dear ${payeeName},</p><p>Please find attached your BIR Form 2307 for DV No. ${dvNo}.</p>`,
-        attachments: [fileBlob]
-      });
-      return "Fund transfer already sent. Separate email sent to Payee.";
+      sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl);
+      return "Fund transfer already sent. Tax Certificate emailed to Payee.";
     }
     return "Fund transfer sent, but Payee Email not found.";
   }
   return "Fund transfer pending. Tax Cert queued for bundling.";
+}
+
+/**
+ * Sends the signed BIR Form 2307 to a payee whose fund transfer email already went out.
+ * Same layout as sendPayeeEmails() in Code.gs, and the same subject so it threads with
+ * the payee's Fund Transfer Confirmation.
+ */
+function sendTaxCertToPayee(email, payeeName, dvNo, taxData, pdfUrl) {
+  const fmt = (v) => (typeof v === 'number')
+    ? v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : v;
+  const fileBlob = DriveApp.getFileById(getIdFromUrl(pdfUrl)).getBlob();
+
+  const htmlBody = `
+    <div style="font-family: Arial, sans-serif; font-size: 16px; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd;">
+        <div style="background-color: #1C2790; padding: 20px; text-align: center;">
+            <img src="https://i.imgur.com/jaEbfAR.png" alt="DAP Logo" style="width: 400px;">
+        </div>
+        <div style="padding: 25px; border-top: 5px solid #CDAE2C;">
+            <h2 style="color: #1C2790; text-align: center; font-size: 24px; text-transform: uppercase;">CERTIFICATE OF CREDITABLE TAX WITHHELD AT SOURCE</h2>
+            <p>Dear <b>${payeeName}</b>,</p>
+            <p>Further to the fund transfer confirmation sent to you for this transaction, please find attached your signed <b>BIR Form 2307</b> (Certificate of Creditable Tax Withheld at Source). Please see the details below.</p>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 25px; margin-bottom: 25px;">
+                <tr style="background-color: #f2f2f2;"><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Tax Withheld:</td><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold; font-size: 1.1em; color: #1C2790;">PHP ${fmt(taxData['EWT Amount'])}</td></tr>
+                <tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Tax Base:</td><td style="padding: 12px; border: 1px solid #ddd;">PHP ${fmt(taxData['Tax Base'])}</td></tr>
+                <tr><td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">DV Number:</td><td style="padding: 12px; border: 1px solid #ddd;">${dvNo}</td></tr>
+            </table>
+            <p>Please keep this certificate for your tax filing. If any detail on the certificate is incorrect, please notify the Treasury Division by replying to this email, or call local 136.</p>
+            <p style="margin-top: 30px;">Thank you,</p><p><b>Finance Department</b></p>
+        </div>
+        <div style="text-align: center; font-size: 12px; color: #777; padding: 15px; background-color: #f9f9f9; border-top: 1px solid #ddd;"><p>This is an automated notification. Your reply will be sent to the Treasury Division.</p></div>
+    </div>
+  `;
+
+  MailApp.sendEmail({
+    to: email,
+    bcc: 'balcen@dap.edu.ph,anchetad@dap.edu.ph',
+    subject: `DAP Fund Transfer Confirmation (DV No. ${dvNo})`,
+    htmlBody: htmlBody,
+    name: 'DAP E-Payment System',
+    replyTo: 'cashtreasury@dap.edu.ph',
+    attachments: [fileBlob]
+  });
 }
 
 function getMasterDvData(dvNo) {
