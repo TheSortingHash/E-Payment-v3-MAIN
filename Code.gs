@@ -807,7 +807,8 @@ function sendPayeeEmails(batchNo) {
                 const fullAccountNo = accountMap.get(payeeName) || "XXXX";
                 const lastFourDigits = fullAccountNo.toString().slice(-4);
 
-                const subject = `DAP Fund Transfer Confirmation (DV No. ${dvNo})`;
+                // One subject per batch so every confirmation (and the BCC copies) lands in a single thread.
+                const subject = `DAP Fund Transfer Confirmation (Batch ${batchNo})`;
 
                 let htmlBody = `
                     <div style="font-family: Arial, sans-serif; font-size: 16px; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd;">
