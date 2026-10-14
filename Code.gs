@@ -137,18 +137,20 @@ function getInitialDataForTreasuryWebApp() {
   const amountCol = headers.indexOf('Amount Due');
   const transTypeCol = headers.indexOf('Transaction Type');
   const batchNoCol = headers.indexOf('Batch No');
+  const transferRemarksCol = headers.indexOf('Transfer Remarks');
 
   for (const row of data) {
     try {
       const status = row[statusCol];
       const batchNo = row[batchNoCol];
       const amount = parseFloat(row[amountCol]) || 0;
-      
+
       const transaction = {
           payeeName: row[payeeNameCol],
           dvNo: row[dvNoCol],
           amount: amount,
-          transType: row[transTypeCol]
+          transType: row[transTypeCol],
+          transferRemarks: transferRemarksCol > -1 ? row[transferRemarksCol] : ''
       };
 
       if (status === 'For Processing') {
@@ -636,27 +638,6 @@ function getBatchFolder(batchNo) {
   return batchFolder;
 }
 
-/**
- * Updates the status of transactions in a finalized batch.
- * The file moving part has been removed as it's now done in Stage 4a.
- * @param {string} batchNo The batch number to process.
- */
-function updateStatusAndArchiveDvs(batchNo) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
-  const dataRange = sheet.getRange('A2:O' + sheet.getLastRow());
-  const data = dataRange.getValues();
-  
-  const statusCol = 1; // Column B
-  const batchNoCol = 14; // Column O
-
-  for (let i = 0; i < data.length; i++) {
-    if (data[i][batchNoCol] === batchNo) {
-      // Update status to the final state for Treasury
-      sheet.getRange(i + 2, statusCol + 1).setValue('Approved & Emailed');
-    }
-  }
-}
-
 // --- STAGE 5 FUNCTIONS ---
 
 /**
@@ -672,8 +653,10 @@ function showFinalizeDialog() {
 /**
  * Generates the Annex H report as a PDF, dynamically inserting rows
  * and finding the 'TOTAL' cell to place the final sum.
+ * Unsuccessful transfers (failuresByDv: DV No -> bank remarks) are listed in red with the
+ * bank's reason, left out of TOTAL, and explained in a reconciliation block under it.
  */
-function generateAnnexH(batchNo, weaccessRef, batchFolder) {
+function generateAnnexH(batchNo, weaccessRef, batchFolder, failuresByDv = new Map()) {
   const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
   const masterData = masterSheet.getDataRange().getValues();
   const headers = masterData.shift();
@@ -705,25 +688,45 @@ function generateAnnexH(batchNo, weaccessRef, batchFolder) {
   const amountCol = headers.indexOf('Amount Due');
   const batchNoColData = headers.indexOf('Batch No');
 
+  let registerTotal = 0;
+  const failedRowOffsets = [];
+
   for (const row of masterData) {
     if (row[batchNoColData] === batchNo) {
       const amount = row[amountCol];
+      const failReason = failuresByDv.get(row[dvNoCol].toString());
+      const isFailed = failReason !== undefined;
       reportRows.push([
-        batchDateStr, "N/A", weaccessRef, row[payeeNameCol], row[dvNoCol], 
-        row[busNoCol], row[projectCodeCol], row[transTypeCol], amount
+        batchDateStr, "N/A", weaccessRef, row[payeeNameCol], row[dvNoCol],
+        row[busNoCol], row[projectCodeCol],
+        isFailed ? `UNSUCCESSFUL - ${failReason}` : row[transTypeCol],
+        amount
       ]);
-      totalAmount += amount;
+      registerTotal += amount;
+      if (isFailed) {
+        failedRowOffsets.push(reportRows.length - 1);
+      } else {
+        totalAmount += amount;
+      }
     }
   }
+  totalAmount = Math.round(totalAmount * 100) / 100;
+  registerTotal = Math.round(registerTotal * 100) / 100;
 
   if (reportRows.length > 0) {
     const dataStartRow = 7;
     if (reportRows.length > 1) {
         reportSheet.insertRowsBefore(dataStartRow + 1, reportRows.length - 1);
     }
-    
+
     reportSheet.getRange(dataStartRow, 1, reportRows.length, 9).setValues(reportRows);
-    
+
+    // Unsuccessful transfers: whole row in red; amount shown but excluded from TOTAL.
+    for (const offset of failedRowOffsets) {
+        reportSheet.getRange(dataStartRow + offset, 1, 1, 9).setFontColor('#C00000');
+        reportSheet.getRange(dataStartRow + offset, 8).setWrap(true);
+    }
+
     const hColumnValues = reportSheet.getRange("H:H").getValues();
     let totalRowIndex = -1;
     for (let i = 0; i < hColumnValues.length; i++) {
@@ -736,6 +739,26 @@ function generateAnnexH(batchNo, weaccessRef, batchFolder) {
     if (totalRowIndex > -1) {
         const totalCell = reportSheet.getRange(totalRowIndex + 1, 9); // Column I
         totalCell.setValue(totalAmount).setNumberFormat('#,##0.00');
+
+        if (failedRowOffsets.length > 0) {
+            // Reconciliation: register / debit memo (full batch) less unsuccessful = bank statement (net).
+            const totalRow = totalRowIndex + 1;
+            reportSheet.insertRowsAfter(totalRow, 4);
+            reportSheet.getRange(totalRow + 1, 1, 4, 9).clearFormat().setFontFamily('Arial').setFontSize(11);
+            const lines = [
+                ['Total per Payroll Register / Debit Memo', registerTotal],
+                [`Less: Unsuccessful transfers (${failedRowOffsets.length})`, -(Math.round((registerTotal - totalAmount) * 100) / 100)],
+                ['Total e-payments (per bank statement)', totalAmount]
+            ];
+            lines.forEach(([label, value], k) => {
+                const r = totalRow + 2 + k;
+                const weight = k === lines.length - 1 ? 'bold' : 'normal';
+                reportSheet.getRange(r, 4, 1, 5).merge().setValue(label)
+                    .setHorizontalAlignment('right').setFontWeight(weight);
+                reportSheet.getRange(r, 9).setValue(value)
+                    .setNumberFormat('#,##0.00;(#,##0.00)').setFontWeight(weight);
+            });
+        }
     }
   }
   
@@ -958,44 +981,41 @@ function notifyAccounting(batchNo) {
     }
   }
 
-  // --- The logic for creating attachments and the email body remains the same ---
   const payeeNameCol = headers.indexOf('Payee Name');
   const amountCol = headers.indexOf('Amount Due');
+  const dvNoCol = headers.indexOf('DV No');
   let csvContent = "Batch Number,WeAccess Ref No,Payee Name,Client Code,Amount\n";
+  let totalAmount = 0;
   for (const row of batchTransactions) {
     const payeeName = row[payeeNameCol];
     const clientCode = clientCodeMap.get(payeeName) || 'NOT FOUND';
     csvContent += `${batchNo},${weaccessRef},"${payeeName}",${clientCode},${row[amountCol]}\n`;
+    totalAmount += parseFloat(row[amountCol]) || 0;
   }
   const csvBlob = Utilities.newBlob(csvContent, MimeType.CSV, `Accounting Summary - ${batchNo}.csv`);
 
   const reportDate = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' });
   const jevParticulars = `Daily Report of E-Payments from Agency Account - Report No. ${batchNo} with TRN#${weaccessRef} dtd ${reportDate}`;
 
-  const batchFolder = getBatchFolder(batchNo);
-  const attachments = [csvBlob];
-  const pdfFiles = batchFolder.getFilesByType(MimeType.PDF);
-  while (pdfFiles.hasNext()) {
-    attachments.push(pdfFiles.next().getBlob());
-  }
+  const props = PropertiesService.getScriptProperties();
+  const failures = JSON.parse(props.getProperty(`UNSUCCESSFUL_${batchNo}`) || '[]');
 
-  const recipient = 'padillaj@dap.edu.ph,baguim@dap.edu.ph,preciadosr@dap.edu.ph';
-  const subject = `For Recording: E-Payment Batch ${batchNo}`;
-  const htmlBody = `
-    <p>Good day,</p>
-    <p>Please see attached files for the completed e-payment batch <b>${batchNo}</b> with WeAccess TRN <b>${weaccessRef}</b>.</p>
-    <p>This includes the Accounting Summary, Annex H, Debit Memo, and all supporting Disbursement Vouchers.</p>
-    <br>
-    <p>Please input the following particulars for your JEV Recording:</p>
-    <div style="border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9; border-radius: 5px; font-family: monospace;">
-      ${jevParticulars}
-    </div>
-    <br>
-    <p>This is an automated e-mail. Please do not reply. Thank you.</p>
-  `;
-  
+  const batchFolder = getBatchFolder(batchNo);
+  const attachments = [csvBlob].concat(_collectBatchAttachments(batchFolder, batchNo, masterData, headers));
+
   MailApp.sendEmail({
-    to: recipient, subject: subject, htmlBody: htmlBody, attachments: attachments,
+    to: ACCOUNTING_RECIPIENTS,
+    subject: `For Recording: E-Payment Batch ${batchNo}`,
+    htmlBody: _buildAccountingEmailHtml({
+      batchNo: batchNo,
+      weaccessRef: weaccessRef,
+      successful: batchTransactions.map(row => ({ payeeName: row[payeeNameCol], dvNo: row[dvNoCol], amount: parseFloat(row[amountCol]) || 0 })),
+      totalAmount: Math.round(totalAmount * 100) / 100,
+      failures: failures,
+      jevParticulars: jevParticulars,
+      attachmentNames: attachments.map(b => b.getName())
+    }),
+    attachments: attachments,
     name: 'DAP E-Payment Notification (NO-REPLY)'
   });
   
@@ -1005,6 +1025,7 @@ function notifyAccounting(batchNo) {
       masterSheet.getRange(i + 2, statusCol + 1).setValue('Completed');
     }
   }
+  props.deleteProperty(`UNSUCCESSFUL_${batchNo}`);
   
   // Return a success message instead of showing an alert
   return { success: true, message: `Success! Batch "${batchNo}" has been finalized and a notification has been sent to the Accounting Division.`};
@@ -1859,73 +1880,491 @@ function requestEndorsementForWebApp(batchNo, refNo, fileData) {
 
 function notifyAccountingForWebApp(batchNo) {
     try {
-        notifyAccounting(batchNo);
-        return { success: true, message: `Accounting has been notified for batch ${batchNo}.` };
+        // notifyAccounting() returns { success: false } when the batch isn't ready; pass that through.
+        return notifyAccounting(batchNo);
     } catch (e) {
         return { success: false, message: `Error: ${e.message}` };
     }
 }
+
 /**
- * Web app function for finalizing a batch.
- * This version handles the two file uploads from the dialog.
+ * Web app function for finalizing a batch (Stage 5).
+ * payload: { debitMemo, successReport, unsuccessReport, noSuccessful } — files as { name, mimeType, bytes }.
+ *
+ * Every DV in the batch must be accounted for by the LandBank Report on Successful Transactions,
+ * or by the Report on Unsuccessful Transactions. When DVs are missing from the successful report
+ * and no unsuccessful report was sent, it returns { needsUnsuccessfulReport: true, missing } so the
+ * hub can ask for it. Nothing is changed or emailed until both reports reconcile with the batch.
  */
-function finalizeBatchForWebApp(batchNo, fileData) {
+function finalizeBatchForWebApp(batchNo, payload) {
+    const lock = LockService.getScriptLock();
+    if (!lock.tryLock(30000)) {
+        return { success: false, message: 'Another batch is being finalized. Please try again in a minute.' };
+    }
+    const savedReports = [];
     try {
-        const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
-        const data = sheet.getDataRange().getValues();
-        const headers = data.shift();
-        const batchNoCol = headers.indexOf('Batch No');
-        const refNoCol = headers.indexOf('WeAccess Ref No');
-        let weaccessRef = '';
+        if (!payload || !payload.debitMemo) throw new Error('Please upload the Debit Memo.');
+        const noSuccessful = !!payload.noSuccessful;
+        if (!noSuccessful && !payload.successReport) throw new Error('Please upload the Report on Successful Transactions.');
+        if (noSuccessful && !payload.unsuccessReport) throw new Error('Please upload the Report on Unsuccessful Transactions.');
 
-        for(const row of data){
-            if(row[batchNoCol] === batchNo){
-                weaccessRef = row[refNoCol];
-                break;
+        const batchRows = _getBatchRowsWithAccounts(batchNo);
+        if (batchRows.length === 0) throw new Error(`No transactions found for batch "${batchNo}".`);
+        const notReady = batchRows.find(r => r.status !== 'Pending WeAccess Approval');
+        if (notReady) throw new Error(`Batch "${batchNo}" is not awaiting finalization (status: ${notReady.status}).`);
+        const weaccessRef = (batchRows.find(r => r.weaccessRef) || {}).weaccessRef;
+        if (!weaccessRef) throw new Error('Could not find the WeAccess Reference Number for this batch.');
+        const noAccount = batchRows.filter(r => !r.accountNo);
+        if (noAccount.length) throw new Error('No LandBank account on file for: ' + noAccount.map(r => r.payeeName).join(', '));
+
+        const batchFolder = getBatchFolder(batchNo);
+        const errors = [];
+        const pool = batchRows.slice(); // batch DVs not yet found in a report
+        let successes = [];
+        let failures = [];
+
+        // Saves the upload, reads it, and checks it is the expected report for this batch's TRN.
+        const readReport = (fileData, expectedType, label) => {
+            const file = _saveUploadedFile(fileData, batchFolder, `TEMP ${label} - ${batchNo}`);
+            savedReports.push(file);
+            const report = _parseTransferReport(file.getId());
+            if (report.type !== expectedType) {
+                errors.push(`- The file uploaded as the ${label} is a Report on ${report.type} Transactions.`);
+                return null;
             }
+            if (report.trn.replace(/\D/g, '') !== weaccessRef.toString().replace(/\D/g, '')) {
+                errors.push(`- ${label}: TRN ${report.trn || '(not found)'} does not match this batch's TRN ${weaccessRef}.`);
+                return null;
+            }
+            return { file: file, report: report };
+        };
+
+        let successReport = null;
+        if (!noSuccessful) {
+            successReport = readReport(payload.successReport, 'SUCCESSFUL', 'Report on Successful Transactions');
+            if (successReport) successes = _matchReportRows(pool, successReport.report.transactions, 'Successful report', errors);
         }
-        if (!weaccessRef) throw new Error("Could not find the WeAccess Reference Number for this batch.");
-        
-        finalizeBatch({ batchNo: batchNo, weaccessRef: weaccessRef, file: fileData });
-        return { success: true, message: `Batch ${batchNo} has been finalized.` };
+        if (errors.length) return _rejectFinalize(savedReports, errors);
+
+        if (pool.length > 0 && !payload.unsuccessReport) {
+            _trashFiles(savedReports);
+            return {
+                success: false,
+                needsUnsuccessfulReport: true,
+                message: `${pool.length} transaction(s) in batch ${batchNo} are not in the Report on Successful Transactions. Please also upload the Report on Unsuccessful Transactions.`,
+                missing: pool.map(r => `${r.payeeName} (DV ${r.dvNo}) - ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+            };
+        }
+
+        let unsuccessReport = null;
+        if (payload.unsuccessReport) {
+            unsuccessReport = readReport(payload.unsuccessReport, 'UNSUCCESSFUL', 'Report on Unsuccessful Transactions');
+            if (unsuccessReport) failures = _matchReportRows(pool, unsuccessReport.report.transactions, 'Unsuccessful report', errors);
+        }
+        if (pool.length > 0) {
+            errors.push('- Not found in either report: ' + pool.map(r => `${r.payeeName} (DV ${r.dvNo})`).join(', '));
+        }
+        if (errors.length) return _rejectFinalize(savedReports, errors);
+
+        // Validated: file the reports and the debit memo under their standard names.
+        if (successReport) successReport.file.setName(`Report on Successful Transactions - ${batchNo} - ${weaccessRef}.xlsx`);
+        if (unsuccessReport) unsuccessReport.file.setName(`Report on Unsuccessful Transactions - ${batchNo} - ${weaccessRef}.xlsx`);
+        const memoExt = (payload.debitMemo.name.match(/\.[A-Za-z0-9]+$/) || ['.pdf'])[0];
+        _saveUploadedFile(payload.debitMemo, batchFolder, `Debit Memo - ${batchNo} - ${weaccessRef}${memoExt}`);
+        savedReports.length = 0; // filed for good: keep them even if a later step fails
+
+        const message = finalizeBatch({ batchNo, weaccessRef, batchFolder, successes, failures });
+        return { success: true, message: message };
     } catch (e) {
-        return { success: false, message: `Error: ${e.message}` };
+        _trashFiles(savedReports);
+        return { success: false, message: e.message };
+    } finally {
+        lock.releaseLock();
     }
 }
 
 
 /**
- * Main orchestrator for Stage 5. Now reads the WeAccess TRN from the sheet.
+ * Main orchestrator for Stage 5, run after the transfer reports have been validated.
+ * Successful DVs: Annex H, 'Approved & Emailed', fund transfer confirmation email.
+ * Unsuccessful DVs: listed in red on Annex H, then returned to For Batching (no payee email).
  */
-function finalizeBatch(dataObject) {
-  const { batchNo, file } = dataObject;
+function finalizeBatch({ batchNo, weaccessRef, batchFolder, successes, failures }) {
+  const failureLog = failures.map(f => ({ dvNo: f.dvNo, payeeName: f.payeeName, amount: f.amount, reason: f.remarks }));
 
-  const batchFolder = getBatchFolder(batchNo);
-  const fileBlob = Utilities.newBlob(Utilities.base64Decode(file.bytes), file.mimeType, file.name);
-  batchFolder.createFile(fileBlob);
-
-  // --- FIX: Read the saved WeAccess TRN from the sheet ---
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
-  const data = sheet.getDataRange().getValues();
-  const headers = data.shift();
-  const batchNoCol = headers.indexOf('Batch No');
-  const refNoCol = headers.indexOf('WeAccess Ref No');
-  let weaccessRef = '';
-
-  for(const row of data){
-    if(row[batchNoCol] === batchNo){
-      weaccessRef = row[refNoCol];
-      break;
-    }
+  if (successes.length > 0) {
+    // Annex H first, while the unsuccessful DVs still belong to the batch.
+    generateAnnexH(batchNo, weaccessRef, batchFolder, new Map(failures.map(f => [f.dvNo, f.remarks])));
   }
 
-  if (!weaccessRef) {
-      throw new Error("Could not find the WeAccess Reference Number for this batch in the sheet.");
+  _returnFailedDvsToBatching(batchNo, weaccessRef, failures);
+
+  if (successes.length === 0) {
+    _sendNoPaymentNoticeToAccounting(batchNo, weaccessRef, batchFolder, failureLog);
+    return `Batch "${batchNo}" had no successful transfers. All ${failures.length} DV(s) are back in For Batching, and Accounting has been sent the reports.`;
   }
 
-  generateAnnexH(batchNo, weaccessRef, batchFolder);
-  updateStatusAndArchiveDvs(batchNo); // No longer needs weaccessRef
+  updateStatusAndArchiveDvs(batchNo); // only the successful DVs are still in the batch
   sendPayeeEmails(batchNo);
 
-  return `Success! Batch "${batchNo}" has been finalized. Annex H has been generated and emails have been sent.`;
+  if (failureLog.length > 0) {
+    // Read by notifyAccounting() (Stage 6) for the unsuccessful-transfers section.
+    PropertiesService.getScriptProperties().setProperty(`UNSUCCESSFUL_${batchNo}`, JSON.stringify(failureLog));
+    return `Batch "${batchNo}" has been finalized. ${successes.length} confirmation email(s) sent. ` +
+      `${failures.length} unsuccessful transfer(s) were returned to For Batching: ` +
+      failureLog.map(f => `${f.payeeName} (DV ${f.dvNo})`).join(', ') + '.';
+  }
+  return `Batch "${batchNo}" has been finalized. Annex H has been generated and ${successes.length} confirmation email(s) sent.`;
+}
+
+// --- STAGE 5: TRANSFER REPORT HELPERS ---
+
+const ACCOUNTING_RECIPIENTS = 'padillaj@dap.edu.ph,baguim@dap.edu.ph,preciadosr@dap.edu.ph';
+const MASTER_EXTRA_COLUMNS = ['Transfer Remarks', 'Cancel Reason', 'Cancelled By', 'Cancelled On'];
+
+/**
+ * Adds any missing MASTER_EXTRA_COLUMNS headers to Master_DV_List and returns the full header row.
+ */
+function _ensureMasterColumns(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const missing = MASTER_EXTRA_COLUMNS.filter(h => headers.indexOf(h) === -1);
+  if (missing.length) {
+    sheet.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+    headers.push(...missing);
+  }
+  return headers;
+}
+
+function _normalizeAccountNo(value) {
+  const digits = (value || '').toString().replace(/\D/g, '');
+  return digits ? digits.padStart(10, '0') : '';
+}
+
+/**
+ * Batch DVs with the LandBank account FINDES used for each (SDO account for PCF/RF, else payroll).
+ */
+function _getBatchRowsWithAccounts(batchNo) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const data = ss.getSheetByName('Master_DV_List').getDataRange().getValues();
+  const headers = data[0];
+  const col = name => headers.indexOf(name);
+  const accountMap = new Map(ss.getSheetByName('Payee_Database').getDataRange().getValues().map(r => [r[0], r[1]]));
+  const sdoMap = new Map(ss.getSheetByName('SDO_PCF_Accounts').getDataRange().getValues().map(r => [r[0], r[1]]));
+
+  const rows = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row[col('Batch No')] || row[col('Batch No')].toString() !== batchNo.toString()) continue;
+    const payeeName = row[col('Payee Name')];
+    const transactionType = row[col('Transaction Type')];
+    let account;
+    if (transactionType === 'Replenishment of Petty Cash Funds' || transactionType === 'Establishment of Revolving Fund') {
+      account = sdoMap.get(payeeName);
+    }
+    if (!account) account = accountMap.get(payeeName);
+    rows.push({
+      rowNumber: i + 1,
+      dvNo: row[col('DV No')].toString(),
+      payeeName: payeeName,
+      amount: parseFloat(row[col('Amount Due')]) || 0,
+      status: row[col('Status')],
+      weaccessRef: row[col('WeAccess Ref No')],
+      accountNo: _normalizeAccountNo(account)
+    });
+  }
+  return rows;
+}
+
+/**
+ * Reads a LandBank WeAccess "Report on Successful/Unsuccessful Transactions" (.xlsx) by
+ * converting a temporary copy to a Google Sheet.
+ * @return {{type: string, trn: string, transactions: Array<{accountNo, amount, remarks}>}}
+ */
+function _parseTransferReport(fileId) {
+  const copy = Drive.Files.copy(
+    { name: `temp_transfer_report_${new Date().getTime()}`, mimeType: MimeType.GOOGLE_SHEETS },
+    fileId, { fields: 'id' });
+  try {
+    const rows = SpreadsheetApp.openById(copy.id).getSheets()[0].getDataRange().getDisplayValues();
+    let type = '';
+    let trn = '';
+    let header = null;
+    let footerCount = null;
+    const transactions = [];
+
+    for (const row of rows) {
+      const line = row.join(' ').replace(/\s+/g, ' ').trim();
+      if (!line) continue;
+
+      if (!header) {
+        // UNSUCCESSFUL must be tried first: it contains the word SUCCESSFUL.
+        const typeMatch = line.match(/REPORT ON (UNSUCCESSFUL|SUCCESSFUL) TRANSACTIONS/i);
+        if (typeMatch && !type) { type = typeMatch[1].toUpperCase(); continue; }
+        const trnMatch = line.match(/Transaction Reference Number\s*:\s*([\d-]+)/i);
+        if (trnMatch && !trn) { trn = trnMatch[1]; continue; }
+        const upper = row.map(c => c.toString().toUpperCase().trim());
+        const destCol = upper.indexOf('DESTINATION ACCOUNT');
+        if (destCol > -1) {
+          header = { dest: destCol, amount: upper.findIndex(c => c.startsWith('AMOUNT')), remarks: upper.indexOf('REMARKS') };
+        }
+        continue;
+      }
+
+      const firstCell = row[0].toString().trim();
+      if (/^TOTAL/i.test(firstCell)) {
+        // TOTAL COUNT / TOTAL AMOUNT DEBITED: never transaction rows, even if the amount has 9-10 digits.
+        if (/^TOTAL COUNT/i.test(firstCell)) footerCount = parseInt(row[1].toString().replace(/\D/g, ''), 10);
+        continue;
+      }
+      const accountDigits = row[header.dest].toString().replace(/\D/g, '');
+      if (!/^\d{9,10}$/.test(accountDigits)) continue; // footer / blank lines
+      transactions.push({
+        accountNo: accountDigits.padStart(10, '0'),
+        amount: parseFloat(row[header.amount].toString().replace(/,/g, '')) || 0,
+        remarks: header.remarks > -1 ? row[header.remarks].toString().replace(/\s+/g, ' ').trim() : ''
+      });
+    }
+
+    if (!type || !header) {
+      throw new Error('The uploaded file is not a LandBank Report on Successful/Unsuccessful Transactions.');
+    }
+    if (footerCount !== null && !isNaN(footerCount) && footerCount !== transactions.length) {
+      throw new Error(`The ${type.toLowerCase()} report's TOTAL COUNT is ${footerCount}, but ${transactions.length} transaction row(s) were read.`);
+    }
+    return { type: type, trn: trn, transactions: transactions };
+  } finally {
+    Drive.Files.remove(copy.id);
+  }
+}
+
+/**
+ * Pairs each report line with a batch DV by account AND amount, removing matched DVs from
+ * the pool so a payee with two DVs in the batch is matched once per report line.
+ */
+function _matchReportRows(pool, transactions, reportLabel, errors) {
+  const matched = [];
+  for (const t of transactions) {
+    const idx = pool.findIndex(r => r.accountNo === t.accountNo && Math.abs(r.amount - t.amount) < 0.01);
+    if (idx === -1) {
+      const sameAccount = pool.find(r => r.accountNo === t.accountNo);
+      errors.push(sameAccount
+        ? `- ${reportLabel}: amount ${t.amount.toFixed(2)} for account ...${t.accountNo.slice(-4)} does not match ${sameAccount.payeeName} (${sameAccount.amount.toFixed(2)}).`
+        : `- ${reportLabel}: account ...${t.accountNo.slice(-4)} (${t.amount.toFixed(2)}) is not in this batch.`);
+      continue;
+    }
+    matched.push(Object.assign({}, pool[idx], { remarks: t.remarks }));
+    pool.splice(idx, 1);
+  }
+  return matched;
+}
+
+function _saveUploadedFile(fileData, folder, name) {
+  const blob = Utilities.newBlob(Utilities.base64Decode(fileData.bytes), fileData.mimeType, name);
+  return folder.createFile(blob);
+}
+
+function _trashFiles(files) {
+  files.forEach(f => { try { f.setTrashed(true); } catch (e) { console.error('Could not trash temp report: ' + e.message); } });
+}
+
+function _rejectFinalize(savedReports, errors) {
+  _trashFiles(savedReports);
+  return { success: false, message: 'Validation Failed:\n\n' + errors.join('\n') };
+}
+
+/**
+ * Sends unsuccessful DVs back to For Batching and records the bank's reason in Transfer Remarks.
+ */
+function _returnFailedDvsToBatching(batchNo, weaccessRef, failures) {
+  if (!failures.length) return;
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
+  const headers = _ensureMasterColumns(sheet);
+  const col = name => headers.indexOf(name) + 1;
+  const dateStr = Utilities.formatDate(new Date(), 'Asia/Manila', 'MM/dd/yyyy');
+
+  for (const f of failures) {
+    const remarkCell = sheet.getRange(f.rowNumber, col('Transfer Remarks'));
+    const previous = remarkCell.getValue();
+    const remark = `Unsuccessful - Batch ${batchNo} (TRN ${weaccessRef}) ${dateStr}: ${f.remarks}`;
+    remarkCell.setValue(previous ? `${previous} | ${remark}` : remark);
+    sheet.getRange(f.rowNumber, 1).setValue(false); // selection checkbox
+    sheet.getRange(f.rowNumber, col('Status')).setValue('For Processing');
+    sheet.getRange(f.rowNumber, col('Batch No')).setValue('');
+    sheet.getRange(f.rowNumber, col('WeAccess Ref No')).setValue('');
+  }
+}
+
+/**
+ * Files in the batch folder to send to Accounting, skipping FINDES, native Google files, and
+ * DV PDFs that no longer belong to this batch (e.g. unsuccessful DVs returned to For Batching).
+ */
+function _collectBatchAttachments(batchFolder, batchNo, masterData, headers) {
+  const batchNoCol = headers.indexOf('Batch No');
+  const pdfLinkCol = headers.indexOf('PDF_Link');
+  const otherDvFileIds = new Set();
+  for (const row of masterData) {
+    if (row[batchNoCol] && row[batchNoCol].toString() === batchNo.toString()) continue;
+    const link = row[pdfLinkCol];
+    const match = typeof link === 'string' && (link.match(/\/d\/(.+?)\//) || link.match(/id=([^&]+)/));
+    if (match) otherDvFileIds.add(match[1]);
+  }
+
+  // Annex H, debit memo, reports and register first, then the DVs.
+  const rank = name => ['Annex H', 'Debit Memo', 'Report on Successful', 'Report on Unsuccessful', 'Payroll Register']
+    .findIndex(prefix => name.indexOf(prefix) === 0);
+  const files = [];
+  const it = batchFolder.getFiles();
+  while (it.hasNext()) {
+    const file = it.next();
+    if (file.getMimeType().indexOf('application/vnd.google-apps') === 0) continue;
+    if (file.getName().indexOf('FINDES-') === 0) continue;
+    if (otherDvFileIds.has(file.getId())) continue;
+    files.push(file);
+  }
+  files.sort((a, b) => {
+    const ra = rank(a.getName()), rb = rank(b.getName());
+    return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb) || a.getName().localeCompare(b.getName());
+  });
+  return files.map(f => f.getBlob());
+}
+
+/**
+ * Accounting email for a batch where every transfer failed: no Annex H and no JEV, but
+ * Accounting still receives the debit memo, the unsuccessful report and the register.
+ */
+function _sendNoPaymentNoticeToAccounting(batchNo, weaccessRef, batchFolder, failureLog) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
+  const masterData = sheet.getDataRange().getValues();
+  const headers = masterData.shift();
+  const attachments = _collectBatchAttachments(batchFolder, batchNo, masterData, headers);
+
+  MailApp.sendEmail({
+    to: ACCOUNTING_RECIPIENTS,
+    subject: `For Information: E-Payment Batch ${batchNo} - No Successful Transfers`,
+    htmlBody: _buildAccountingEmailHtml({
+      batchNo: batchNo,
+      weaccessRef: weaccessRef,
+      successful: [],
+      totalAmount: 0,
+      failures: failureLog,
+      jevParticulars: null,
+      attachmentNames: attachments.map(b => b.getName())
+    }),
+    attachments: attachments,
+    name: 'DAP E-Payment Notification (NO-REPLY)'
+  });
+}
+
+/**
+ * Accounting email in the same layout as the payee and authorizer emails. When jevParticulars is
+ * null the batch had no successful transfers and the email says there is nothing to record.
+ */
+function _buildAccountingEmailHtml({ batchNo, weaccessRef, successful, totalAmount, failures, jevParticulars, attachmentNames }) {
+  const fmt = n => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const cell = 'padding: 10px; border: 1px solid #ddd;';
+  const noPayments = !jevParticulars;
+  const failedTotal = Math.round(failures.reduce((sum, f) => sum + (Number(f.amount) || 0), 0) * 100) / 100;
+
+  let html = `
+  <div style="font-family: Arial, sans-serif; font-size: 16px; color: #333; max-width: 700px; margin: auto; border: 1px solid #ddd;">
+    <div style="background-color: #1C2790; padding: 20px; text-align: center;">
+      <img src="https://i.imgur.com/jaEbfAR.png" alt="DAP Logo" style="width: 400px;">
+    </div>
+    <div style="padding: 25px; border-top: 5px solid #CDAE2C;">
+      <h2 style="color: #1C2790; text-align: center; font-size: 22px; text-transform: uppercase;">${noPayments ? 'No Successful Transfers' : 'For Recording: E-Payment Batch'}</h2>
+      <p>Good day,</p>
+      <p>${noPayments
+        ? `None of the transfers in e-payment batch <b>${batchNo}</b> went through. There is no e-payment to record; the debit memo and LandBank reports are attached for your information.`
+        : `Please see the attached files for the completed e-payment batch <b>${batchNo}</b>.`}</p>
+      <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+        <tr style="background-color: #f2f2f2;"><td style="${cell} font-weight: bold;">Batch Number:</td><td style="${cell} font-weight: bold; color: #1C2790;">${batchNo}</td></tr>
+        <tr><td style="${cell} font-weight: bold;">WeAccess TRN:</td><td style="${cell}">${weaccessRef}</td></tr>
+        <tr><td style="${cell} font-weight: bold;">Successful Transfers:</td><td style="${cell}">${successful.length}</td></tr>
+        <tr><td style="${cell} font-weight: bold;">Total E-Payments:</td><td style="${cell} font-weight: bold; color: #1C2790;">PHP ${fmt(totalAmount)}</td></tr>
+      </table>`;
+
+  if (failures.length > 0) {
+    html += `
+      <h3 style="color: #C00000; margin-bottom: 8px;">Unsuccessful Transfers (${failures.length})</h3>
+      <p style="margin-top: 0; font-size: 14px;">These DVs were not credited and have been returned to Treasury for re-batching. They are excluded from the total above.</p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 15px;">
+        <tr style="background-color: #f2f2f2;"><th style="${cell} text-align: left;">Payee</th><th style="${cell} text-align: left;">DV No.</th><th style="${cell} text-align: right;">Amount</th><th style="${cell} text-align: left;">Bank Remarks</th></tr>`;
+    for (const f of failures) {
+      html += `<tr><td style="${cell}">${f.payeeName}</td><td style="${cell}">${f.dvNo}</td><td style="${cell} text-align: right; color: #C00000;">${fmt(f.amount)}</td><td style="${cell}">${f.reason}</td></tr>`;
+    }
+    html += `</table>`;
+    if (!noPayments) {
+      html += `
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 20px;">
+        <tr><td style="padding: 4px 10px; text-align: right;">Total per Payroll Register / Debit Memo</td><td style="padding: 4px 10px; text-align: right; width: 140px;">${fmt(totalAmount + failedTotal)}</td></tr>
+        <tr><td style="padding: 4px 10px; text-align: right;">Less: Unsuccessful transfers (${failures.length})</td><td style="padding: 4px 10px; text-align: right;">(${fmt(failedTotal)})</td></tr>
+        <tr><td style="padding: 4px 10px; text-align: right; font-weight: bold;">Total e-payments (per bank statement)</td><td style="padding: 4px 10px; text-align: right; font-weight: bold; border-top: 1px solid #333;">${fmt(totalAmount)}</td></tr>
+      </table>`;
+    }
+  }
+
+  if (!noPayments) {
+    // The particulars sit alone in their own block: one click selects them where the mail client
+    // honours user-select, and a triple-click selects exactly this line everywhere else.
+    html += `
+      <p style="margin-bottom: 6px;"><b>JEV Particulars</b> <span style="font-size: 13px; color: #777;">(click or triple-click the box to select, then copy)</span></p>
+      <div style="border: 2px dashed #1C2790; background-color: #f5f7ff; padding: 14px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 15px; color: #000; cursor: text; user-select: all; -webkit-user-select: all; -moz-user-select: all; -ms-user-select: all;">${jevParticulars}</div>`;
+  }
+
+  html += `
+      <p style="margin-top: 25px; margin-bottom: 6px;"><b>Attached:</b></p>
+      <ul style="margin-top: 0; font-size: 14px; color: #555;">${attachmentNames.map(n => `<li>${n}</li>`).join('')}</ul>
+      <p style="margin-top: 30px;">Thank you,</p><p><b>Treasury Division</b></p>
+    </div>
+    <div style="text-align: center; font-size: 12px; color: #777; padding: 15px; background-color: #f9f9f9; border-top: 1px solid #ddd;"><p>This is an automated e-mail from the DAP E-Payment System. Please do not reply.</p></div>
+  </div>`;
+  return html;
+}
+
+// --- FOR BATCHING: CANCEL A DV ---
+
+function _getSessionUser(token) {
+  if (!token) return null;
+  const session = CacheService.getScriptCache().get(`session_${token}`);
+  if (!session) return null;
+  const [email, role] = session.split(':');
+  return { email: email, role: role };
+}
+
+/**
+ * Cancels a DV that is still For Batching. The row is kept (status 'Cancelled', with reason,
+ * user and date) so the DV number stays blocked from re-upload and the audit trail is intact.
+ */
+function cancelDvForWebApp(token, dvNo, reason) {
+  try {
+    const user = _getSessionUser(token);
+    if (!user || (user.role !== 'Treasury' && user.role !== 'Admin')) {
+      throw new Error('Only Treasury users can cancel a DV. Please log in again.');
+    }
+    if (!reason || !reason.toString().trim()) throw new Error('Please enter the reason for cancelling.');
+
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
+    const headers = _ensureMasterColumns(sheet);
+    const data = sheet.getDataRange().getValues();
+    const col = name => headers.indexOf(name);
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][col('DV No')].toString() !== dvNo.toString()) continue;
+      const status = data[i][col('Status')];
+      if (status !== 'For Processing') {
+        throw new Error(`DV ${dvNo} can no longer be cancelled (status: ${status}).`);
+      }
+      const rowNumber = i + 1;
+      sheet.getRange(rowNumber, 1).setValue(false);
+      sheet.getRange(rowNumber, col('Status') + 1).setValue('Cancelled');
+      sheet.getRange(rowNumber, col('Cancel Reason') + 1).setValue(reason.toString().trim());
+      sheet.getRange(rowNumber, col('Cancelled By') + 1).setValue(user.email);
+      sheet.getRange(rowNumber, col('Cancelled On') + 1).setValue(new Date());
+      return { success: true, message: `DV ${dvNo} has been cancelled and removed from For Batching.` };
+    }
+    throw new Error(`DV ${dvNo} was not found.`);
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
 }

@@ -32,6 +32,14 @@
         #loader { text-align: center; padding: 50px; font-size: 20px; color: #6c757d; }
         .search-bar { margin-bottom: 20px; padding: 10px; font-size: 16px; width: 300px; border: 1px solid #ccc; border-radius: 4px;}
         .dv-link { color: #007bff; text-decoration: underline; cursor: pointer; }
+        .remark-tag { margin-top: 4px; font-size: 12px; color: #C00000; background: #fdecea; border-left: 3px solid #C00000; padding: 3px 6px; border-radius: 3px; }
+        .cancel-button { background: none; border: 1px solid #C00000; color: #C00000; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+        .cancel-button:hover { background-color: #fdecea; }
+        #action-dialog { max-width: 520px; width: 90%; max-height: 85vh; overflow-y: auto; box-sizing: border-box; }
+        .dialog-field { margin-bottom: 14px; }
+        .dialog-field label { font-weight: bold; }
+        .missing-list { background: #fff8e1; border-left: 3px solid #CDAE2C; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; }
+        .missing-list ul { margin: 6px 0 0 0; padding-left: 18px; }
     </style>
 </head>
 <body>
@@ -55,7 +63,7 @@
         <div class="table-container">
             <button class="action-button accent" style="margin: 10px;" onclick="createBatch()">Create Batch from Selection</button>
             <table id="for-batching-table">
-                <thead><tr><th><input type="checkbox" onchange="toggleAllCheckboxes(this)"></th><th>Payee Name</th><th>DV No</th><th>Amount</th><th>Transaction Type</th></tr></thead>
+                <thead><tr><th><input type="checkbox" onchange="toggleAllCheckboxes(this)"></th><th>Payee Name</th><th>DV No</th><th>Amount</th><th>Transaction Type</th><th></th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
@@ -85,7 +93,7 @@
         <h3 id="dialog-title">Action</h3>
         <div id="dialog-content"></div>
         <button id="dialog-submit" class="action-button accent">Submit</button>
-        <button onclick="closeDialog()">Cancel</button>
+        <button onclick="closeDialog()">Close</button>
     </div>
 </div>
 
@@ -110,6 +118,19 @@
     function formatCurrency(num) {
         if (typeof num !== 'number') return '0.00';
         return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function escapeHtml(text) {
+        return String(text == null ? '' : text).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function readFileAsPayload(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve({ name: file.name, mimeType: file.type, bytes: e.target.result.split(',')[1] });
+            reader.onerror = () => reject(new Error('Could not read ' + file.name));
+            reader.readAsDataURL(file);
+        });
     }
 
     // --- INITIALIZATION ---
@@ -141,12 +162,15 @@
         tbody.innerHTML = '';
         data.forEach(row => {
             const tr = tbody.insertRow();
+            const remarkHtml = row.transferRemarks
+                ? `<div class="remark-tag"><b>Previously unsuccessful:</b> ${escapeHtml(row.transferRemarks)}</div>` : '';
             tr.innerHTML = `
                 <td><input type="checkbox" class="dv-checkbox" value="${row.dvNo}"></td>
-                <td>${row.payeeName}</td>
+                <td>${row.payeeName}${remarkHtml}</td>
                 <td><span class="dv-link" onclick="viewDvPdf('${row.dvNo}')">${row.dvNo}</span></td>
                 <td class="amount">${formatCurrency(row.amount)}</td>
                 <td>${row.transType}</td>
+                <td><button class="cancel-button" onclick="cancelDv('${row.dvNo}')">Cancel</button></td>
             `;
         });
     }
@@ -327,19 +351,82 @@ function handleFindesResponse(response) {
         });
     }
     
+    // --- STAGE 5: FINALIZE WITH LANDBANK TRANSFER REPORTS ---
     function finalizeBatch(batchNo, event) {
         event.stopPropagation();
-        const content = `<label>Debit Memo PDF:</label><br><input type="file" id="dialog-file">`;
-        showDialog('Finalize Batch', content, () => {
-            const file = document.getElementById('dialog-file').files[0];
-            if (!file) { alert('Please upload the Debit Memo.'); return; }
-            showLoader('Finalizing batch...');
-            const reader = new FileReader();
-            reader.onload = e => {
-                const fileData = { name: file.name, mimeType: file.type, bytes: e.target.result.split(',')[1] };
-                google.script.run.withSuccessHandler(handleSuccess).finalizeBatchForWebApp(batchNo, fileData);
+        const content = `
+            <div class="dialog-field"><label>Debit Memo:</label><br><input type="file" id="fz-debit-memo"></div>
+            <div class="dialog-field"><label><input type="checkbox" id="fz-no-success" onchange="toggleNoSuccessful()"> No successful transfers</label></div>
+            <div class="dialog-field" id="fz-success-field"><label>Report on Successful Transactions (.xlsx):</label><br><input type="file" id="fz-success" accept=".xlsx"></div>
+            <div class="dialog-field" id="fz-unsuccess-field" style="display:none;">
+                <div id="fz-missing"></div>
+                <label>Report on Unsuccessful Transactions (.xlsx):</label><br><input type="file" id="fz-unsuccess" accept=".xlsx">
+            </div>`;
+        showDialog('Finalize Batch ' + batchNo, content, () => submitFinalize(batchNo));
+    }
+
+    function toggleNoSuccessful() {
+        const none = document.getElementById('fz-no-success').checked;
+        document.getElementById('fz-success-field').style.display = none ? 'none' : 'block';
+        document.getElementById('fz-unsuccess-field').style.display = none ? 'block' : 'none';
+        document.getElementById('fz-missing').innerHTML = '';
+    }
+
+    async function submitFinalize(batchNo) {
+        const noSuccessful = document.getElementById('fz-no-success').checked;
+        const debitMemo = document.getElementById('fz-debit-memo').files[0];
+        const successFile = document.getElementById('fz-success').files[0];
+        const unsuccessVisible = document.getElementById('fz-unsuccess-field').style.display !== 'none';
+        const unsuccessFile = unsuccessVisible ? document.getElementById('fz-unsuccess').files[0] : null;
+
+        if (!debitMemo) { alert('Please upload the Debit Memo.'); return; }
+        if (!noSuccessful && !successFile) { alert('Please upload the Report on Successful Transactions.'); return; }
+        if (unsuccessVisible && !unsuccessFile) { alert('Please upload the Report on Unsuccessful Transactions.'); return; }
+
+        showLoader('Validating reports and finalizing batch...');
+        try {
+            const payload = {
+                noSuccessful: noSuccessful,
+                debitMemo: await readFileAsPayload(debitMemo),
+                successReport: (!noSuccessful && successFile) ? await readFileAsPayload(successFile) : null,
+                unsuccessReport: unsuccessFile ? await readFileAsPayload(unsuccessFile) : null
             };
-            reader.readAsDataURL(file);
+            google.script.run
+                .withSuccessHandler(handleFinalizeResponse)
+                .withFailureHandler(err => { hideLoader(); alert('Error: ' + err.message); })
+                .finalizeBatchForWebApp(batchNo, payload);
+        } catch (e) {
+            hideLoader();
+            alert('Error: ' + e.message);
+        }
+    }
+
+    function handleFinalizeResponse(response) {
+        if (response.needsUnsuccessfulReport) {
+            // Keep the dialog open and ask for the unsuccessful report; the other files stay selected.
+            hideLoader();
+            document.getElementById('fz-missing').innerHTML =
+                `<div class="missing-list"><b>Not in the Report on Successful Transactions:</b><ul>${response.missing.map(m => `<li>${escapeHtml(m)}</li>`).join('')}</ul></div>`;
+            document.getElementById('fz-unsuccess-field').style.display = 'block';
+            alert(response.message);
+            return;
+        }
+        handleSuccess(response);
+    }
+
+    // --- FOR BATCHING: CANCEL A DV ---
+    function cancelDv(dvNo) {
+        const content = `<p>Cancelled DVs are removed from For Batching and cannot be uploaded again.</p>
+            <div class="dialog-field"><label>Reason for cancelling DV ${escapeHtml(dvNo)}:</label><br><textarea id="cancel-reason" rows="3" style="width: 95%;"></textarea></div>`;
+        showDialog('Cancel DV ' + dvNo, content, () => {
+            const reason = document.getElementById('cancel-reason').value.trim();
+            if (!reason) { alert('Please enter the reason for cancelling.'); return; }
+            if (!confirm(`Cancel DV ${dvNo}? This cannot be undone from the hub.`)) return;
+            showLoader('Cancelling DV...');
+            google.script.run
+                .withSuccessHandler(handleSuccess)
+                .withFailureHandler(err => { hideLoader(); alert('Error: ' + err.message); })
+                .cancelDvForWebApp(sessionStorage.getItem('sessionToken') || sessionToken, dvNo, reason);
         });
     }
     
