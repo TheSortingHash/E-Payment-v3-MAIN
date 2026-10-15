@@ -146,9 +146,13 @@
             background-color: #5a6268;
         }
 
+        /* Shown while a server call runs: sits above everything and blocks clicks so nothing is submitted twice. */
+        #busy-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.75); z-index: 1000; align-items: center; justify-content: center; }
+        #busy-overlay .busy-box { background: white; border: 1px solid #dee2e6; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 20px 28px; font-size: 18px; color: #1C2790; max-width: 80%; text-align: center; font-family: Arial, sans-serif; }
     </style>
 </head>
 <body>
+<div id="busy-overlay"><div class="busy-box"><span id="busy-message">Working...</span><br><small style="color:#6c757d;">Please wait and don't close this page.</small></div></div>
 
 <div class="header">
     <img src="https://i.imgur.com/jaEbfAR.png" alt="DAP Logo" />
@@ -433,8 +437,15 @@
     });
 
     // --- UI HELPERS ---
-    function showLoader() { document.getElementById('loader').style.display = 'block'; }
-    function hideLoader() { document.getElementById('loader').style.display = 'none'; }
+    // Busy overlay: sits above the modals and blocks clicks until the server responds.
+    function showLoader(message) {
+        document.getElementById('busy-message').textContent = message || 'Working...';
+        document.getElementById('busy-overlay').style.display = 'flex';
+    }
+    function hideLoader() { document.getElementById('busy-overlay').style.display = 'none'; }
+
+    // google.script.run with a failure handler, so an error never leaves the overlay up.
+    function serverCall() { return google.script.run.withFailureHandler(handleError); }
     
     function openTab(evt, tabName) {
         document.querySelectorAll('.container > .tab-content').forEach(tab => tab.classList.remove('active'));
@@ -461,8 +472,8 @@
     
     // --- INTERNAL PAYEE & COMMON ---
     function loadPayees() {
-        showLoader();
-        google.script.run.withSuccessHandler(payees => {
+        showLoader('Loading payees...');
+        serverCall().withSuccessHandler(payees => {
             currentPayees = payees;
             renderPayeeTable(payees);
             populateSdoPayeeDropdown(payees);
@@ -509,14 +520,14 @@
     function addPayee() {
         const d = getFormData();
         if(!d.name || !d.account) return alert('Name and Account required');
-        showLoader();
-        google.script.run.withSuccessHandler(handleSuccess).addPayee(d);
+        showLoader('Adding payee...');
+        serverCall().withSuccessHandler(handleSuccess).addPayee(d);
     }
     
     function updatePayee() {
         if (!selectedPayeeName) return alert('Select a payee first');
-        showLoader();
-        google.script.run.withSuccessHandler(handleSuccess).updatePayee(selectedPayeeName, getFormData());
+        showLoader('Updating payee...');
+        serverCall().withSuccessHandler(handleSuccess).updatePayee(selectedPayeeName, getFormData());
     }
 
     function getFormData() {
@@ -577,7 +588,7 @@
         updateProgress(5, "Fetching Database Map...");
 
         // 1. Fetch DB Map from Server
-        google.script.run.withSuccessHandler(serverDbMap => {
+        serverCall().withSuccessHandler(serverDbMap => {
             dbMap = serverDbMap;
             updateProgress(15, "Reading CSV File...");
             
@@ -808,13 +819,13 @@
 
         if (!confirm(`Are you sure you want to add ${payloadNew.length} new payees and update ${payloadUpdate.length} accounts?`)) return;
 
-        showLoader();
-        google.script.run.withSuccessHandler(handleSuccess).commitReconciliationBatch(payloadNew, payloadUpdate);
+        showLoader('Syncing payee database...');
+        serverCall().withSuccessHandler(handleSuccess).commitReconciliationBatch(payloadNew, payloadUpdate);
     }
     
     // --- EXTERNAL & SDO ---
     function loadEnrollmentRequests() {
-        google.script.run.withSuccessHandler(data => {
+        serverCall().withSuccessHandler(data => {
             allRequests = {};
             enrolledList = data.enrolled || []; // Store enrolled list
             
@@ -957,8 +968,8 @@
         const n = document.getElementById('m-hrisName').value;
         const no = document.getElementById('m-hrisNo').value;
         if(!n || !no) return alert('HRIS details required');
-        showLoader();
-        google.script.run.withSuccessHandler(h => handleSuccess(h.message)).submitRequestToAdmin(idx, n, no);
+        showLoader('Submitting request...');
+        serverCall().withSuccessHandler(h => handleSuccess(h.message)).submitRequestToAdmin(idx, n, no);
     }
     
     // --- REVISED apprEnroll: Scrapes Editable Fields ---
@@ -985,8 +996,8 @@
 
         if(!confirm(`Confirm enrollment for ${updatedReq.HRIS_Formatted_Name}?`)) return;
 
-        showLoader();
-        google.script.run.withSuccessHandler(h => handleSuccess(h.message)).approveAndEnrollPayee(updatedReq);
+        showLoader('Enrolling payee...');
+        serverCall().withSuccessHandler(h => handleSuccess(h.message)).approveAndEnrollPayee(updatedReq);
     }
 
     // --- DOCUMENT VIEWER LOGIC ---
@@ -1027,7 +1038,7 @@
     }
 
     function loadSdoAccounts() {
-        google.script.run.withSuccessHandler(list => {
+        serverCall().withSuccessHandler(list => {
             const t = document.querySelector('#sdoTable tbody');
             t.innerHTML = '';
             list.forEach(s => t.insertRow().innerHTML = `<td>${s.name}</td><td>${s.account}</td>`);
@@ -1048,8 +1059,8 @@
         const n = document.getElementById('sdoPayeeName').value;
         const a = document.getElementById('pcfAccountNumber').value;
         if(!n || !a) return alert('Data missing');
-        showLoader();
-        google.script.run.withSuccessHandler(handleSuccess).addSdoAccount(n,a);
+        showLoader('Saving SDO account...');
+        serverCall().withSuccessHandler(handleSuccess).addSdoAccount(n,a);
     }
 
     // --- REJECTION LOGIC ---
@@ -1092,9 +1103,11 @@
         const originalText = btn.innerText;
         btn.innerText = "Processing...";
         btn.disabled = true;
+        showLoader('Rejecting request...');
 
         google.script.run
             .withSuccessHandler((res) => {
+                hideLoader();
                 btn.innerText = originalText;
                 btn.disabled = false;
                 if (res.success) {
@@ -1107,6 +1120,7 @@
                 }
             })
             .withFailureHandler((err) => {
+                hideLoader();
                 btn.innerText = originalText;
                 btn.disabled = false;
                 alert("Error: " + err.message);

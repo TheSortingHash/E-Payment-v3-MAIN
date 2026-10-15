@@ -1644,6 +1644,10 @@ function getPdfLinkForDv(dvNumber) {
 // --- WEB APP ACTION FUNCTIONS (STANDALONE) ---
 
 function createBatchFromWebApp(dvNumbers) {
+  return _withScriptLock(() => _createBatchFromWebApp(dvNumbers));
+}
+
+function _createBatchFromWebApp(dvNumbers) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
     const dataRange = sheet.getRange('A2:P' + sheet.getLastRow()); 
@@ -1663,11 +1667,18 @@ function createBatchFromWebApp(dvNumbers) {
     const newSerialNumber = ('000' + (lastSerial + 1)).slice(-4);
     const newBatchNumber = `${year}-${month}-${newSerialNumber}`;
 
+    // Only DVs still waiting for batching: a repeat request (double click, second tab)
+    // must not move already-batched DVs into another batch.
+    let batchedCount = 0;
     for (let i = 0; i < data.length; i++) {
-        if (dvNumbers.includes(data[i][dvNoCol].toString())) {
+        if (dvNumbers.includes(data[i][dvNoCol].toString()) && data[i][statusCol] === 'For Processing') {
             sheet.getRange(i + 2, statusCol + 1).setValue('Batched for Approval');
             sheet.getRange(i + 2, batchNoCol + 1).setValue(newBatchNumber);
+            batchedCount++;
         }
+    }
+    if (batchedCount === 0) {
+        return { success: false, message: 'The selected DVs have already been batched. Please refresh the page.' };
     }
     return { success: true, message: `Batch ${newBatchNumber} created successfully.` };
   } catch (e) {
@@ -1679,7 +1690,7 @@ function createBatchFromWebApp(dvNumbers) {
  * Generates the FINDES file for a given batch from the web app.
  * UPDATED to include the batch number in the SDO confirmation message.
  */
-function generateFindesForWebApp(batchNo) {
+function _generateFindesForWebApp(batchNo) {
     try {
         const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
         const payeeDbSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Payee_Database');
@@ -1772,7 +1783,7 @@ function generateFindesForWebApp(batchNo) {
  * A new function to proceed with FINDES generation after user confirmation.
  * This version will always use the regular payroll account for all payees in the batch.
  */
-function generateFindesForWebAppWithOverride(batchNo) {
+function _generateFindesForWebAppWithOverride(batchNo) {
     try {
         const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List');
         const payeeDbSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Payee_Database');
@@ -1842,7 +1853,7 @@ function generateFindesForWebAppWithOverride(batchNo) {
  * Web app function for requesting endorsement.
  * This version includes automatic validation of the Payroll Register PDF.
  */
-function requestEndorsementForWebApp(batchNo, refNo, fileData) {
+function _requestEndorsementForWebApp(batchNo, refNo, fileData) {
   try {
     // --- VALIDATION STEP ---
     // Create a temporary file from the uploaded data to get a File ID for the OCR function.
@@ -1878,7 +1889,62 @@ function requestEndorsementForWebApp(batchNo, refNo, fileData) {
   }
 }
 
+// --- DUPLICATE-ACTION GUARDS ---
+// Each Treasury step runs under the script lock and only when the batch is at the step it
+// belongs to, so a repeated request (double click, second tab, two users) changes nothing.
+
+function _withScriptLock(fn) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return { success: false, message: 'Another action is still running. Please try again in a minute.' };
+  }
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Error message if any DV in the batch is not at expectedStatus, else null. */
+function _batchNotAtStatus(batchNo, expectedStatus) {
+  const data = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Master_DV_List').getDataRange().getValues();
+  const headers = data[0];
+  const batchNoCol = headers.indexOf('Batch No');
+  const statusCol = headers.indexOf('Status');
+  const statuses = data.slice(1)
+    .filter(row => row[batchNoCol] && row[batchNoCol].toString() === batchNo.toString())
+    .map(row => row[statusCol]);
+  if (statuses.length === 0) return `No transactions found for batch "${batchNo}".`;
+  const other = statuses.find(st => st !== expectedStatus);
+  return other ? `Batch "${batchNo}" has already moved past this step (status: ${other}). Please refresh the page.` : null;
+}
+
+function generateFindesForWebApp(batchNo) {
+  return _withScriptLock(() => {
+    const blocked = _batchNotAtStatus(batchNo, 'Batched for Approval');
+    return blocked ? { success: false, message: blocked } : _generateFindesForWebApp(batchNo);
+  });
+}
+
+function generateFindesForWebAppWithOverride(batchNo) {
+  return _withScriptLock(() => {
+    const blocked = _batchNotAtStatus(batchNo, 'Batched for Approval');
+    return blocked ? { success: false, message: blocked } : _generateFindesForWebAppWithOverride(batchNo);
+  });
+}
+
+function requestEndorsementForWebApp(batchNo, refNo, fileData) {
+  return _withScriptLock(() => {
+    const blocked = _batchNotAtStatus(batchNo, 'FINDES Generated');
+    return blocked ? { success: false, message: blocked } : _requestEndorsementForWebApp(batchNo, refNo, fileData);
+  });
+}
+
 function notifyAccountingForWebApp(batchNo) {
+  return _withScriptLock(() => _notifyAccountingForWebApp(batchNo));
+}
+
+function _notifyAccountingForWebApp(batchNo) {
     try {
         // notifyAccounting() returns { success: false } when the batch isn't ready; pass that through.
         return notifyAccounting(batchNo);
