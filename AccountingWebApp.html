@@ -74,9 +74,13 @@
       .status-approved { background-color: #28a745; }
       
       #loader { text-align: center; display: none; padding: 20px; }
+        /* Shown while a server call runs: sits above everything and blocks clicks so nothing is submitted twice. */
+        #busy-overlay { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.75); z-index: 1000; align-items: center; justify-content: center; }
+        #busy-overlay .busy-box { background: white; border: 1px solid #dee2e6; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 20px 28px; font-size: 18px; color: #1C2790; max-width: 80%; text-align: center; font-family: Arial, sans-serif; }
     </style>
   </head>
   <body>
+<div id="busy-overlay"><div class="busy-box"><span id="busy-message">Working...</span><br><small style="color:#6c757d;">Please wait and don't close this page.</small></div></div>
     <div class="header">
         <img src="https://coe-psp.dap.edu.ph/wp-content/uploads/2022/06/dap-logo.png" alt="DAP Logo" class="header-logo">
         <button class="logout-btn" onclick="handleLogout()">Logout</button>
@@ -150,6 +154,15 @@
         }).logoutUser(token);
       }
       
+      // --- BUSY OVERLAY: blocks repeat clicks while a request runs ---
+      function showBusy(message) {
+        document.getElementById('busy-message').textContent = message;
+        document.getElementById('busy-overlay').style.display = 'flex';
+      }
+      function hideBusy() {
+        document.getElementById('busy-overlay').style.display = 'none';
+      }
+
       // --- TAB LOGIC ---
       function openTab(evt, tabName) {
         const tabContent = document.getElementsByClassName("tab-content");
@@ -247,6 +260,7 @@ function renderTaxTable(data) {
         
         // Step 1: Generate Draft
         btn.innerText = "Generating Draft...";
+        showBusy(`Generating tax certificate draft for DV ${dvNo}...`);
         google.script.run
             .withSuccessHandler((res) => {
                 if (res.success) {
@@ -254,18 +268,21 @@ function renderTaxTable(data) {
                     btn.innerText = "Sending Email...";
                     requestApprovalEmail(dvNo, btn, originalText);
                 } else {
+                    hideBusy();
                     alert("Error generating draft: " + res.message);
                     btn.innerText = originalText;
                     btn.disabled = false;
                 }
             })
-            .withFailureHandler((err) => { alert(err); btn.disabled = false; })
+            .withFailureHandler((err) => { hideBusy(); alert(err); btn.innerText = originalText; btn.disabled = false; })
             .generateTaxCert(dvNo, false); // false = Draft
       }
 
       function requestApprovalEmail(dvNo, btn, originalText) {
+        showBusy(`Sending approval request for DV ${dvNo}...`);
         google.script.run
             .withSuccessHandler((res) => {
+                hideBusy();
                 if (res.success) {
                     alert("Success! Draft generated and Approval Request sent to Accountant.");
                     loadTaxCerts(); // Refresh UI
@@ -274,7 +291,7 @@ function renderTaxTable(data) {
                     loadTaxCerts();
                 }
             })
-            .withFailureHandler((err) => { alert("Email Error: " + err); loadTaxCerts(); })
+            .withFailureHandler((err) => { hideBusy(); alert("Email Error: " + err); loadTaxCerts(); })
             .sendAccountantEmail(dvNo);
       }
 
@@ -302,6 +319,7 @@ function renderTaxTable(data) {
         statusDiv.textContent = "Processing... please wait.";
         statusDiv.style.color = 'blue';
         uploadButton.disabled = true;
+        showBusy('Uploading and processing DV...');
 
         const file = fileInput.files[0];
         const reader = new FileReader();
@@ -313,13 +331,14 @@ function renderTaxTable(data) {
           };
           google.script.run
             .withSuccessHandler(updateStatus)
-            .withFailureHandler(updateStatus)
+            .withFailureHandler(err => updateStatus(String(err && err.message ? err.message : err)))
             .processUploadedPdfForWebApp(dataObject);
         };
         reader.readAsDataURL(file);
       });
 
       function updateStatus(result) {
+        hideBusy();
         // Handle string errors (from failure handler)
         if (typeof result === 'string') {
              statusDiv.textContent = "Error: " + result;

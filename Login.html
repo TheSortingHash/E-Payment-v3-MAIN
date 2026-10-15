@@ -97,13 +97,13 @@
                 <input type="checkbox" id="admin-view-checkbox" style="margin-right: 10px;">
                 <label for="admin-view-checkbox">Open Admin Dashboard</label>
             </div>
-            <button onclick="handleLogin()">Login</button>
+            <button id="login-button" onclick="handleLogin()">Login</button>
         </div>
         <div id="register" class="tab-content">
             <input type="email" id="register-email" placeholder="DAP Email Address (@dap.edu.ph)" required>
             <input type="password" id="register-password" placeholder="Choose a Password" required>
             <input type="password" id="register-confirm-password" placeholder="Confirm Password" required>
-            <button class="accent" onclick="handleRegistration()">Register</button>
+            <button id="register-button" class="accent" onclick="handleRegistration()">Register</button>
         </div>
         <div id="message"></div>
     </div>
@@ -130,8 +130,12 @@
             }
             messageDiv.textContent = 'Logging in...';
             messageDiv.style.color = 'blue';
+            setButtonBusy('login-button', true);
             // Pass the checkbox state to the backend
-            google.script.run.withSuccessHandler(handleLoginResponse).loginUser(email, password, isAdminView);
+            google.script.run
+                .withSuccessHandler(handleLoginResponse)
+                .withFailureHandler(err => handleLoginResponse({ success: false, message: 'Error: ' + (err && err.message ? err.message : err) }))
+                .loginUser(email, password, isAdminView);
         }
 
         function handleRegistration() {
@@ -156,10 +160,24 @@
             }
             messageDiv.textContent = 'Registering...';
             messageDiv.style.color = 'blue';
-            google.script.run.withSuccessHandler(handleRegistrationResponse).registerUser(email, password);
+            setButtonBusy('register-button', true);
+            google.script.run
+                .withSuccessHandler(handleRegistrationResponse)
+                .withFailureHandler(err => handleRegistrationResponse('Error: ' + (err && err.message ? err.message : err)))
+                .registerUser(email, password);
+        }
+
+        // Disables a button while its request runs so a double click can't send it twice.
+        function setButtonBusy(id, busy) {
+            const btn = document.getElementById(id);
+            btn.disabled = busy;
+            btn.style.opacity = busy ? '0.6' : '';
+            btn.style.cursor = busy ? 'wait' : '';
         }
 
         function handleLoginResponse(response) {
+            // Stays disabled on success: the page is redirecting.
+            if (!response.success) setButtonBusy('login-button', false);
             const messageDiv = document.getElementById('message');
             messageDiv.textContent = response.message;
             messageDiv.style.color = response.success ? 'green' : 'red';
@@ -169,6 +187,7 @@
         }
 
         function handleRegistrationResponse(message) {
+            setButtonBusy('register-button', false);
             const messageDiv = document.getElementById('message');
             messageDiv.textContent = message;
             messageDiv.style.color = message.includes('Success') ? 'green' : 'red';
