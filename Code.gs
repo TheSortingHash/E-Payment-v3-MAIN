@@ -600,6 +600,13 @@ function requestEndorsement(dataObject) {
             name: 'DAP E-Payment System'
         });
 
+        notifyChat(recipient, 'WeAccess approval needed', [
+            `Batch: *${batchNo}*`,
+            `WeAccess TRN: ${weaccessRef}`,
+            `Transactions: ${batchTransactions.length}`,
+            `Total amount: PHP ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        ]);
+
         return { success: true, message: `Success! Endorsement request for batch "${batchNo}" has been sent.` };
     } else {
         throw new Error(`No transactions found for batch "${batchNo}".`);
@@ -899,6 +906,13 @@ function sendPayeeEmails(batchNo) {
                 }
 
                 MailApp.sendEmail(emailOptions);
+
+                notifyChat(email, 'Fund transfer confirmation', [
+                    `Amount: *PHP ${formattedAmount}*`,
+                    `Payment for: ${transactionType}`,
+                    `DV No.: ${dvNo}`,
+                    `Credited to your Landbank account ending in ${lastFourDigits}.`
+                ]);
             }
         }
     }
@@ -998,6 +1012,12 @@ function notifyAccounting(batchNo) {
     to: recipient, subject: subject, htmlBody: htmlBody, attachments: attachments,
     name: 'DAP E-Payment Notification (NO-REPLY)'
   });
+
+  notifyChat(recipient, 'Batch ready for JEV recording', [
+    `Batch: *${batchNo}*`,
+    `WeAccess TRN: ${weaccessRef}`,
+    'The batch package has been sent to your email.'
+  ]);
   
   const allSheetData = masterSheet.getRange("A2:P" + masterSheet.getLastRow()).getValues();
   for (let i = 0; i < allSheetData.length; i++) {
